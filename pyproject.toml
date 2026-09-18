@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fanqo"
+version = "0.2.0"
+description = "Franzua's Accelerator Nonlinear Quasi-Invariant Optimizer: linear optics, nonlinear invariants, optimization, FMA and Ix tracking."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "sympy>=1.11",
+  "matplotlib>=3.7",
+  "cma>=3.3",
+]
+
+[project.optional-dependencies]
+tracking = ["accelerator-toolbox[plot]"]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

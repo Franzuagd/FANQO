@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+optimization_output/
+nonlinear_plots/
+
+# Local FANQO working files (user-editable, not library source)
+/general_config.py
+/lattice_config.py
+/run.py
