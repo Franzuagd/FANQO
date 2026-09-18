@@ -353,6 +353,8 @@ def plot_slices(details, state, folder, settings):
         px_max=settings["px_max"],
         y_max=settings["y_max"],
         py_max=settings["py_max"],
+        save=settings.get("save", True),
+        show=settings.get("show", False),
     )
 
 

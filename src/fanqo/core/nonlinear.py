@@ -13,12 +13,12 @@ from datetime import datetime
 from math import comb
 
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.sparse as sps
 import sympy as sp
 from scipy.linalg import expm
 
 from . import linear as lin
+from ..plotting import get_pyplot
 
 
 def poly_to_vector(poly, variables, vec_to_idx):
@@ -800,6 +800,8 @@ def plot_invariant_section(
     py_max=1e-3,
     frozen_q0=0.0,
     frozen_p0=0.0,
+    save=True,
+    show=False,
 ):
     """Save invariant contour plots and return the generated paths/data.
 
@@ -813,11 +815,11 @@ def plot_invariant_section(
         return {
             "x": plot_invariant_section(
                 Ix, Iy, state, "x", levels, grid_points, rmin, rmax, delta0,
-                folder, x_max, px_max, y_max, py_max, frozen_q0, frozen_p0,
+                folder, x_max, px_max, y_max, py_max, frozen_q0, frozen_p0, save, show,
             ),
             "y": plot_invariant_section(
                 Ix, Iy, state, "y", levels, grid_points, rmin, rmax, delta0,
-                folder, x_max, px_max, y_max, py_max, frozen_q0, frozen_p0,
+                folder, x_max, px_max, y_max, py_max, frozen_q0, frozen_p0, save, show,
             ),
         }
 
@@ -861,27 +863,34 @@ def plot_invariant_section(
     else:
         lev = np.asarray(levels, dtype=float)
 
-    os.makedirs(folder, exist_ok=True)
-    plt.figure(figsize=(8, 6))
-    plt.contour(Q, P, Z, levels=lev, linewidths=0.45)
-    plt.xlabel(qlab)
-    plt.ylabel(plab)
-    plt.title(title)
-    plt.xlim(-qmax, qmax)
-    plt.ylim(-pmax, pmax)
-    plt.grid(True)
-    plt.tight_layout()
+    path = None
+    if save:
+        os.makedirs(folder, exist_ok=True)
+        filename = (
+            datetime.now().strftime("%Y%m%d_%H%M%S_")
+            + f"invariant_section_{plane}_"
+            + f"{frozen_name_q}_{_format_value_for_filename(frozen_q0)}_"
+            + f"{frozen_name_p}_{_format_value_for_filename(frozen_p0)}_"
+            + f"delta_{_format_value_for_filename(delta0)}.png"
+        )
+        path = os.path.join(folder, filename)
 
-    filename = (
-        datetime.now().strftime("%Y%m%d_%H%M%S_")
-        + f"invariant_section_{plane}_"
-        + f"{frozen_name_q}_{_format_value_for_filename(frozen_q0)}_"
-        + f"{frozen_name_p}_{_format_value_for_filename(frozen_p0)}_"
-        + f"delta_{_format_value_for_filename(delta0)}.png"
-    )
-    path = os.path.join(folder, filename)
-    plt.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close()
+    if save or show:
+        plt = get_pyplot(show)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.contour(Q, P, Z, levels=lev, linewidths=0.45)
+        ax.set_xlabel(qlab)
+        ax.set_ylabel(plab)
+        ax.set_title(title)
+        ax.set_xlim(-qmax, qmax)
+        ax.set_ylim(-pmax, pmax)
+        ax.grid(True)
+        fig.tight_layout()
+        if save:
+            fig.savefig(path, dpi=300, bbox_inches="tight")
+        if show:
+            plt.show()
+        plt.close(fig)
     return Q, P, Z, lev, path
 
 
@@ -902,6 +911,8 @@ def plot_invariant_slices(
     px_max=1e-3,
     y_max=2e-3,
     py_max=1e-3,
+    save=True,
+    show=False,
 ):
     """Create a folder and save a batch of Ix/Iy section plots.
 
@@ -918,7 +929,8 @@ def plot_invariant_slices(
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_folder = os.path.join(folder, f"invariant_slices_{timestamp}")
-    os.makedirs(out_folder, exist_ok=True)
+    if save:
+        os.makedirs(out_folder, exist_ok=True)
 
     results = {
         "folder": out_folder,
@@ -946,6 +958,8 @@ def plot_invariant_slices(
                 py_max=py_max,
                 frozen_q0=y0,
                 frozen_p0=frozen_momentum,
+                save=save,
+                show=show,
             )
 
         results["Iy"][delta0] = {}
@@ -967,6 +981,8 @@ def plot_invariant_slices(
                 py_max=py_max,
                 frozen_q0=x0,
                 frozen_p0=frozen_momentum,
+                save=save,
+                show=show,
             )
 
     return results

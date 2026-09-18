@@ -17,6 +17,7 @@ from .config_loader import load_general_config, load_selected_lattice, analysis_
 from .core import linear as lin
 from .core import nonlinear as nl
 from .core import optimization as opt
+from .plotting import get_pyplot
 
 
 def _cfg():
@@ -65,8 +66,18 @@ def _output_root():
     return _resolve(getattr(_cfg(), "OUTPUT_ROOT", Path("optimization_output")))
 
 
-def _slice_settings():
+def _plot_flags(save=None, show=None):
     cfg = _cfg()
+    if save is None:
+        save = getattr(cfg, "SAVE_PLOTS", True)
+    if show is None:
+        show = getattr(cfg, "SHOW_PLOTS", False)
+    return bool(save), bool(show)
+
+
+def _slice_settings(save=None, show=None):
+    cfg = _cfg()
+    save, show = _plot_flags(save, show)
     return {
         "y_values": cfg.SLICE_Y_VALUES,
         "x_values": cfg.SLICE_X_VALUES,
@@ -80,6 +91,8 @@ def _slice_settings():
         "px_max": cfg.PLOT_PX_MAX,
         "y_max": cfg.PLOT_Y_MAX,
         "py_max": cfg.PLOT_PY_MAX,
+        "save": save,
+        "show": show,
     }
 
 
@@ -223,12 +236,17 @@ def linear_checks():
     return checks
 
 
-def plot_linear(*, file_name=None, show=False):
+def plot_linear(*, file_name=None, save=None, show=None):
     context = _require_context("plot_linear()")
     data = context["data"]
+    save, show = _plot_flags(save, show)
+    if not save and not show:
+        return None
     file_name = _output_root()/"plots"/"linear_optics.png" if file_name is None else _resolve(file_name)
-    file_name = Path(file_name); file_name.parent.mkdir(parents=True, exist_ok=True)
-    import matplotlib.pyplot as plt
+    file_name = Path(file_name)
+    if save:
+        file_name.parent.mkdir(parents=True, exist_ok=True)
+    plt = get_pyplot(show)
     s = lin.linear_data(data, "S_VALUES")
     cs = lin.linear_data(data, "CS_VALUES")
     disp = lin.linear_data(data, "DISP_VALUES")
@@ -237,10 +255,13 @@ def plot_linear(*, file_name=None, show=False):
     ax.plot(s, cs[:,3], label=r"$\beta_y$")
     ax.plot(s, 100*disp[:,0], label=r"$100D_x$")
     ax.set_xlabel("s [m]"); ax.set_ylabel("Linear functions [m]")
-    ax.legend(); ax.grid(True); fig.tight_layout(); fig.savefig(file_name, dpi=200)
-    if show: plt.show()
-    else: plt.close(fig)
-    return file_name
+    ax.legend(); ax.grid(True); fig.tight_layout()
+    if save:
+        fig.savefig(file_name, dpi=200)
+    if show:
+        plt.show()
+    plt.close(fig)
+    return file_name if save else None
 
 
 # =============================================================================
@@ -301,10 +322,11 @@ def nonlinear_checks():
     return checks
 
 
-def plot_invariant(*, folder=None):
+def plot_invariant(*, folder=None, save=None, show=None):
     context=_require_invariants("plot_invariant()"); cfg=_cfg()
+    save, show = _plot_flags(save, show)
     folder=_resolve(cfg.PLOT_ROOT)/"current" if folder is None else _resolve(folder)
-    return opt.plot_slices({"Ix":STATE.Ix,"Iy":STATE.Iy}, context["state"], Path(folder), _slice_settings())
+    return opt.plot_slices({"Ix":STATE.Ix,"Iy":STATE.Iy}, context["state"], Path(folder), _slice_settings(save, show))
 
 
 # =============================================================================
@@ -452,26 +474,34 @@ def _save_csvs(fmap,ix_data,out,label):
     return fma_path,ix_path
 
 
-def _tracking_plots(fmap,ix_data,native,out,label,coords,delta,show):
-    import matplotlib.pyplot as plt
-    out=Path(out); out.mkdir(parents=True,exist_ok=True)
-    fma_path=out/f"{label}_frequency_map.png"
-    if len(fmap):
-        fig,ax=plt.subplots(figsize=(8.2,6.6))
-        s=ax.scatter(fmap[:,0],fmap[:,1],c=fmap[:,6],s=34,marker="s",vmin=-10,vmax=-2)
-        fig.colorbar(s,ax=ax).set_label(r"$\log_{10}$ tune diffusion")
-        ax.set(xlabel=r"$x_0$ [mm]",ylabel=r"$y_0$ [mm]",
-               title=f"Frequency Map Analysis\n{label} | {native['n_cells']} cells | delta={float(delta):g}")
-        ax.set_xlim(coords[0],coords[1]); ax.set_ylim(coords[2],coords[3]); ax.set_aspect("equal"); ax.grid(alpha=.2)
-        fig.tight_layout(); fig.savefig(fma_path,dpi=220)
-        if show: plt.show()
-        else: plt.close(fig)
-    else:
+def _tracking_plots(fmap,ix_data,native,out,label,coords,delta,save,show):
+    out=Path(out)
+    if save:
+        out.mkdir(parents=True,exist_ok=True)
+    fma_path=out/f"{label}_frequency_map.png" if save else None
+    if not len(fmap):
         raise RuntimeError("No valid FMA points survived.")
 
-    ix_path=out/f"{label}_Ix_invariance_map.png"
     valid=(ix_data[:,10]>.5)&np.isfinite(ix_data[:,8])
     if not np.any(valid): raise RuntimeError("No particle survived the Ix tracking interval.")
+    if not save and not show:
+        return None,None
+
+    plt = get_pyplot(show)
+    fig,ax=plt.subplots(figsize=(8.2,6.6))
+    s=ax.scatter(fmap[:,0],fmap[:,1],c=fmap[:,6],s=34,marker="s",vmin=-10,vmax=-2)
+    fig.colorbar(s,ax=ax).set_label(r"$\log_{10}$ tune diffusion")
+    ax.set(xlabel=r"$x_0$ [mm]",ylabel=r"$y_0$ [mm]",
+           title=f"Frequency Map Analysis\n{label} | {native['n_cells']} cells | delta={float(delta):g}")
+    ax.set_xlim(coords[0],coords[1]); ax.set_ylim(coords[2],coords[3]); ax.set_aspect("equal"); ax.grid(alpha=.2)
+    fig.tight_layout()
+    if save:
+        fig.savefig(fma_path,dpi=220)
+    if show:
+        plt.show()
+    plt.close(fig)
+
+    ix_path=out/f"{label}_Ix_invariance_map.png" if save else None
     shown=ix_data[valid]; cfg=_cfg()
     fig,ax=plt.subplots(figsize=(8.2,6.6))
     s=ax.scatter(shown[:,0],shown[:,1],c=shown[:,8],s=34,marker="s",
@@ -480,9 +510,12 @@ def _tracking_plots(fmap,ix_data,native,out,label,coords,delta,show):
     ax.set(xlabel=r"$x_0$ [mm]",ylabel=r"$y_0$ [mm]",
            title=f"Horizontal Invariant Tracking\n{label} | physical ring={native['n_cells']} cells")
     ax.set_xlim(coords[0],coords[1]); ax.set_ylim(coords[2],coords[3]); ax.set_aspect("equal"); ax.grid(alpha=.2)
-    fig.tight_layout(); fig.savefig(ix_path,dpi=220)
-    if show: plt.show()
-    else: plt.close(fig)
+    fig.tight_layout()
+    if save:
+        fig.savefig(ix_path,dpi=220)
+    if show:
+        plt.show()
+    plt.close(fig)
     return fma_path,ix_path
 
 
@@ -517,7 +550,9 @@ def run_fma(*, stage="current", quick=False):
     stage=str(stage); label=f"{cfg.FMA_CASE_LABEL}_{stage}"
     out=_resolve(cfg.FMA_OUTPUT_DIRECTORY)/stage
     fma_csv,ix_csv=_save_csvs(fmap,ix_data,out,label)
-    fma_plot,ix_plot=_tracking_plots(fmap,ix_data,native,out,label,coords,cfg.FMA_DELTA,bool(cfg.FMA_SHOW_PLOT))
+    fma_save=bool(getattr(cfg,"FMA_SAVE_PLOT",getattr(cfg,"SAVE_PLOTS",True)))
+    fma_show=bool(getattr(cfg,"FMA_SHOW_PLOT",getattr(cfg,"SHOW_PLOTS",False)))
+    fma_plot,ix_plot=_tracking_plots(fmap,ix_data,native,out,label,coords,cfg.FMA_DELTA,fma_save,fma_show)
     result={"fmap":fmap,"losses":losses,"ix_data":ix_data,"ring":ring,"native":native,
             "fma_data_path":fma_csv,"ix_data_path":ix_csv,
             "frequency_plot_path":fma_plot,"ix_plot_path":ix_plot,
@@ -679,12 +714,14 @@ def optimize(*,run_start_end_fma=None,quick=False):
 
     print("="*80); print("STARTING NONLINEAR OPTIMIZATION"); print("="*80)
     if quick: print("Mode: QUICK TUTORIAL / SMOKE TEST")
+    plot_settings=_slice_settings()
+    do_slice_plots=bool(cfg.PLOT_START_END_SLICES) and (plot_settings["save"] or plot_settings["show"])
     result=opt.hybrid_optimize(
         context,v0,cfg.VARY,gradient_weight=cfg.GRADIENT_WEIGHT,tol=cfg.LEAST_SQUARES_TOL,
         invalid_penalty=cfg.INVALID_PENALTY,sigma=cfg.CMA_SIGMA,scales=cfg.SCALES,
         cma_time=cma_time,popsize=pop,print_every=cfg.PRINT_EVERY,
-        powell_time_fraction=pfrac,plot_start_end_slices=cfg.PLOT_START_END_SLICES,
-        plot_root=_resolve(cfg.PLOT_ROOT),slice_settings=_slice_settings()
+        powell_time_fraction=pfrac,plot_start_end_slices=do_slice_plots,
+        plot_root=_resolve(cfg.PLOT_ROOT),slice_settings=plot_settings
     )
     STATE.context=result["context"]; _set_invariants(result["final_details"])
     STATE.source="optimized"

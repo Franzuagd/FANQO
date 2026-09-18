@@ -80,6 +80,9 @@ CMA_TIME = 60.0
 POWELL_TIME_FRACTION = 0.25
 
 # 12. NONLINEAR / START-END PLOT SETTINGS
+SAVE_PLOTS = True
+SHOW_PLOTS = False
+
 PLOT_PLANE = "both"
 PLOT_LEVELS = 60
 PLOT_GRID_POINTS = 350
@@ -132,7 +135,8 @@ FMA_DELTA = 0.0
 
 # Parallel tracking. None lets PyAT choose its default process count.
 FMA_POOL_SIZE = None
-FMA_SHOW_PLOT = True
+FMA_SAVE_PLOT = SAVE_PLOTS
+FMA_SHOW_PLOT = SHOW_PLOTS
 
 # Ix invariance tracking uses the same launch grid and total tracking length as
 # the FMA diagnostic (2 * FMA_TURNS complete physical-ring turns).

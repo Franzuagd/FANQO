@@ -6,4 +6,4 @@ from .api import (
  run_fma,write_tracking_report,optimize,save_current_lattice,write_optimization_report,write_full_report,
 )
 __all__=[name for name in globals() if not name.startswith("_")]
-__version__="0.2.0"
+__version__="0.2.1"

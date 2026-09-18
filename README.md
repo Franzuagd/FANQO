@@ -8,9 +8,9 @@ of the horizontal invariant `Ix`.
 
 ## Repository structure
 
-This repository contains the reusable FANQO library itself. Machine-specific
-configuration and runner files are intentionally kept outside the repository so
-that each user maintains their own local experiment files.
+This repository contains the reusable FANQO library and a `user/` starter folder.
+The files under `user/` are templates that users copy to their own working directory
+and edit for their accelerator and run settings.
 
 ```text
 .
@@ -28,7 +28,11 @@ that each user maintains their own local experiment files.
 │           ├── linear.py
 │           ├── nonlinear.py
 │           └── optimization.py
-└── tests/
+├── tests/
+└── user/
+    ├── general_config.py
+    ├── lattice_config.py
+    └── run.py
 ```
 
 The local working directory used by a researcher normally contains files such as:
@@ -40,9 +44,8 @@ my_fanqo_experiment/
 └── run.py
 ```
 
-Those files are user-editable and should not be committed to the FANQO library
-repository. A separate `fanqo_user_starter.zip` can be distributed for this
-purpose.
+The files in `user/` are examples. Copy them outside the FANQO repository before
+editing them for a real experiment.
 
 ## Install with Anaconda
 
@@ -145,3 +148,17 @@ or, for an exact tagged release:
 ```bash
 python -m pip install "git+https://github.com/USER/fanqo.git@v0.2.0"
 ```
+
+## Plot display and saving
+
+The starter `general_config.py` separates saving figures from displaying them:
+
+```python
+SAVE_PLOTS = True
+SHOW_PLOTS = False
+```
+
+This mode saves all requested figures without opening GUI windows and uses a
+non-interactive Matplotlib backend, which is recommended for optimization, FMA,
+remote sessions, and long runs. Set `SHOW_PLOTS = True` when interactive windows
+are desired.

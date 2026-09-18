@@ -12,3 +12,11 @@ These files are intentionally separate from the FANQO GitHub repository.
    python run.py
 
 Your generated plots/reports stay in this local working folder.
+
+PLOT DISPLAY MODE
+-----------------
+In general_config.py:
+    SAVE_PLOTS = True
+    SHOW_PLOTS = False
+saves figures without opening GUI windows. This is the recommended mode for long runs.
+
