@@ -1398,6 +1398,21 @@ def _optimization_report_text(result):
     ]
     if objective_name == "horizontal_invariant_shape":
         lines.append(f"gradient weight = {cfg.GRADIENT_WEIGHT}")
+    active_a_box = np.asarray(
+        STATE.context["state"]["a_box"],
+        dtype=float,
+    )
+    lines += ["", "A_BOX", "-"*90, f"active a_box = {active_a_box.tolist()}"]
+    if STATE.a_box_result is not None:
+        ab = STATE.a_box_result
+        lines += [
+            f"calibration applied = {bool(ab.get('make_active', False))}",
+            f"surviving particles = {ab.get('survivor_count')} / {ab.get('total_particles')}",
+            f"seed a_box = {np.asarray(ab.get('survivor_seed_a_box')).tolist()}",
+            f"selected a_box = {np.asarray(ab.get('best_a_box')).tolist()}",
+            f"seed score = {ab.get('seed_score')}",
+            f"selected score = {ab.get('best_score')}",
+        ]
     lines += [
         "", "OPTIMIZED PARAMETERS", "-"*90,
         f"{'parameter':<14}{'initial':>24}{'final':>24}{'change':>24}",
