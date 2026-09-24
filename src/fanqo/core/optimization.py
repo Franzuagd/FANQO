@@ -100,8 +100,65 @@ def create_context(
             "linear_variables": set(linear_variables),
             "chromatic_variables": set(chromatic_variables),
             "parameter_map": parameter_map,
+            # Keep nonlinear model settings so a_box can be rebuilt without
+            # reconstructing the physical lattice.
+            "m": int(m),
+            "d": int(d),
+            "hamiltonian": hamiltonian,
+            "a_box": np.asarray(a_box, dtype=float).copy(),
+            "variables": tuple(variables),
+            "field_symbols": tuple(field_symbols),
+            "n_planes": int(n_planes),
         },
     }
+
+
+def _build_nonlinear_state(context, a_box):
+    settings = context["settings"]
+    return nl.initialize_nonlinear(
+        context["data"],
+        m=settings["m"],
+        d=settings["d"],
+        hamiltonian=settings["hamiltonian"],
+        a_box=np.asarray(a_box, dtype=float),
+        variables=settings["variables"],
+        field_symbols=settings["field_symbols"],
+        n=settings["n_planes"],
+    )
+
+
+def context_with_a_box(context, a_box):
+    """Return an analysis context with the same lattice and a fresh a_box."""
+    a_box = np.asarray(a_box, dtype=float)
+    expected = len(context["settings"]["variables"])
+    if a_box.shape != (expected,):
+        raise ValueError(f"a_box must have shape ({expected},).")
+    if not np.all(np.isfinite(a_box)) or np.any(a_box <= 0.0):
+        raise ValueError("Every a_box half-width must be positive and finite.")
+
+    settings = dict(context["settings"])
+    settings["a_box"] = a_box.copy()
+    temporary = {
+        "magnets": context["magnets"],
+        "lattice": context["lattice"],
+        "data": context["data"],
+        "correction": context["correction"],
+        "parameters": dict(context["parameters"]),
+        "state": None,
+        "map_cache": {},
+        "settings": settings,
+    }
+    temporary["state"] = _build_nonlinear_state(temporary, a_box)
+    return temporary
+
+
+def set_context_a_box(context, a_box):
+    """Make a new a_box the active nonlinear normalization."""
+    rebuilt = context_with_a_box(context, a_box)
+    context["state"] = rebuilt["state"]
+    context["settings"]["a_box"] = np.asarray(a_box, dtype=float).copy()
+    context["map_cache"].clear()
+    return context
 
 
 def _refresh_nonlinear_normalization(state, data):
@@ -230,20 +287,114 @@ def nonlinear_transfer(context, tol):
     return transfer, transfer[q:, q:], transfer[q:, :q]
 
 
-def _horizontal_invariant(context, tol):
-    state = context["state"]
-    Sx, _ = nl.quadratic_invariants(context["data"], state)
-    _, tnn, tnq = nonlinear_transfer(context, tol)
-
+def _solve_invariant(S, tnn, tnq, state, tol):
+    """Solve one weighted least-squares quasi-invariant plane."""
     Gnn = state["Gnn"]
     D = np.eye(state["nonquad_size"], dtype=float) - tnn
-    Ux = tnq @ Sx
+    U = tnq @ S
 
     Lg = np.linalg.cholesky(Gnn)
-    hx, *_ = np.linalg.lstsq(Lg.T @ D, Lg.T @ Ux, rcond=tol)
-    Ix = np.concatenate((Sx, hx))
-    return Ix, Sx
+    h, *_ = np.linalg.lstsq(Lg.T @ D, Lg.T @ U, rcond=tol)
+    return np.concatenate((S, h))
 
+
+def objective_requirements(Fobj):
+    requirements = getattr(Fobj, "requires", None)
+    if requirements is None:
+        raise ValueError(
+            f"Objective {getattr(Fobj, '__name__', Fobj)!r} must declare a .requires set."
+        )
+    return set(requirements)
+
+
+def prepare_objective_data(
+    context,
+    Fobj,
+    tol,
+    *,
+    compute_ix=True,
+    compute_iy=False,
+    extra_data=None,
+):
+    """Compute only the quantities requested by Fobj.requires."""
+    requirements = objective_requirements(Fobj)
+    extra_data = {} if extra_data is None else dict(extra_data)
+
+    supported = {
+        "Ix", "Iy", "Sx", "Sy", "transfer", "tnn", "tnq",
+        "state", "context",
+    } | set(extra_data)
+    unknown = requirements - supported
+    if unknown:
+        raise ValueError(
+            "Unsupported objective requirement(s): " + ", ".join(sorted(unknown))
+        )
+
+    if "Ix" in requirements and not compute_ix:
+        raise ValueError("The selected objective requires Ix but COMPUTE_IX is False.")
+    if "Iy" in requirements and not compute_iy:
+        raise ValueError("The selected objective requires Iy but COMPUTE_IY is False.")
+
+    state = context["state"]
+    result = {"state": state, "context": context, **extra_data}
+
+    need_quadratic = bool(requirements & {"Sx", "Sy", "Ix", "Iy"})
+    Sx = Sy = None
+    if need_quadratic:
+        Sx, Sy = nl.quadratic_invariants(context["data"], state)
+        if "Sx" in requirements or "Ix" in requirements:
+            result["Sx"] = Sx
+        if "Sy" in requirements or "Iy" in requirements:
+            result["Sy"] = Sy
+
+    need_transfer = bool(requirements & {"Ix", "Iy", "transfer", "tnn", "tnq"})
+    if need_transfer:
+        transfer, tnn, tnq = nonlinear_transfer(context, tol)
+        if "transfer" in requirements:
+            result["transfer"] = transfer
+        if "tnn" in requirements:
+            result["tnn"] = tnn
+        if "tnq" in requirements:
+            result["tnq"] = tnq
+        if "Ix" in requirements:
+            result["Ix"] = _solve_invariant(Sx, tnn, tnq, state, tol)
+        if "Iy" in requirements:
+            result["Iy"] = _solve_invariant(Sy, tnn, tnq, state, tol)
+
+    return result
+
+
+def compute_requested_invariants(context, tol, *, compute_ix=True, compute_iy=False):
+    """Compute selected invariant planes without evaluating an objective."""
+    class _InvariantRequest:
+        requires = set()
+
+    request = _InvariantRequest()
+    if compute_ix:
+        request.requires.add("Ix")
+    if compute_iy:
+        request.requires.add("Iy")
+    if not request.requires:
+        return {}
+
+    data = prepare_objective_data(
+        context,
+        request,
+        tol,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+    )
+    return {key: data[key] for key in ("Ix", "Iy") if key in data}
+
+
+def _call_objective(Fobj, data, objective_kwargs=None):
+    kwargs = {} if objective_kwargs is None else dict(objective_kwargs)
+    output = Fobj(data, **kwargs)
+    if isinstance(output, tuple) and len(output) == 2 and isinstance(output[1], dict):
+        value, diagnostics = output
+    else:
+        value, diagnostics = output, {}
+    return float(value), dict(diagnostics)
 
 def _copy_value(value):
     try:
@@ -285,18 +436,30 @@ def _restore_mutable_context(context, snapshot):
     context["map_cache"].update(snapshot["map_cache"])
 
 
-def evaluate_candidate(context, v, vary, gradient_weight, tol, invalid_penalty):
-    """Update one candidate and return the new horizontal objective."""
+def evaluate_candidate(
+    context,
+    v,
+    vary,
+    Fobj,
+    *,
+    compute_ix,
+    compute_iy,
+    objective_kwargs,
+    tol,
+    invalid_penalty,
+):
+    """Update one candidate and evaluate an arbitrary FANQO objective."""
     snapshot = _snapshot_mutable_context(context)
     try:
         apply_candidate(context, v, vary)
-        Ix, Sx = _horizontal_invariant(context, tol)
-        objective, value_norm, gradient_norm = nl.horizontal_shape_objective(
-            Ix,
-            Sx,
-            context["state"],
-            gradient_weight=gradient_weight,
+        data = prepare_objective_data(
+            context,
+            Fobj,
+            tol,
+            compute_ix=compute_ix,
+            compute_iy=compute_iy,
         )
+        objective, _ = _call_objective(Fobj, data, objective_kwargs)
         if not np.isfinite(objective):
             _restore_mutable_context(context, snapshot)
             return float(invalid_penalty)
@@ -306,28 +469,48 @@ def evaluate_candidate(context, v, vary, gradient_weight, tol, invalid_penalty):
         return float(invalid_penalty)
 
 
-def full_diagnostics(context, gradient_weight, tol):
-    """Compute Ix and Iy for the start/end report and plots."""
-    state = context["state"]
-    Sx, Sy = nl.quadratic_invariants(context["data"], state)
-    transfer, tnn, tnq = nonlinear_transfer(context, tol)
-    result = nl.invariant(tnn, tnq, Sx, Sy, state, tol=tol)
-    Ix, Iy = result[-2], result[-1]
-
-    objective, value_norm, gradient_norm = nl.horizontal_shape_objective(
-        Ix,
-        Sx,
-        state,
-        gradient_weight=gradient_weight,
+def full_diagnostics(
+    context,
+    Fobj,
+    tol,
+    *,
+    compute_ix=True,
+    compute_iy=False,
+    objective_kwargs=None,
+    extra_data=None,
+):
+    """Evaluate an objective and retain only configured invariant planes."""
+    data = prepare_objective_data(
+        context,
+        Fobj,
+        tol,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+        extra_data=extra_data,
     )
-
-    return {
+    objective, diagnostics = _call_objective(Fobj, data, objective_kwargs)
+    details = {
         "objective": float(objective),
-        "value_norm": float(value_norm),
-        "gradient_norm": float(gradient_norm),
-        "Ix": Ix,
-        "Iy": Iy,
+        "objective_name": getattr(Fobj, "__name__", Fobj.__class__.__name__),
+        **diagnostics,
     }
+    for key in ("Ix", "Iy", "Sx", "Sy", "transfer"):
+        if key in data:
+            details[key] = data[key]
+
+    # Keep the configured public invariant state available at start/end without
+    # forcing those extra solves inside every candidate evaluation.
+    missing_ix = bool(compute_ix and "Ix" not in details)
+    missing_iy = bool(compute_iy and "Iy" not in details)
+    if missing_ix or missing_iy:
+        configured = compute_requested_invariants(
+            context,
+            tol,
+            compute_ix=missing_ix,
+            compute_iy=missing_iy,
+        )
+        details.update(configured)
+    return details
 
 
 # =============================================================================
@@ -336,27 +519,51 @@ def full_diagnostics(context, gradient_weight, tol):
 
 
 def plot_slices(details, state, folder, settings):
-    return nl.plot_invariant_slices(
-        details["Ix"],
-        details["Iy"],
-        state,
-        y_values=settings["y_values"],
-        x_values=settings["x_values"],
-        delta_values=settings["delta_values"],
-        frozen_momentum=settings["frozen_momentum"],
-        levels=settings["levels"],
-        grid_points=settings["grid_points"],
-        rmin=settings["rmin"],
-        rmax=settings["rmax"],
-        folder=str(folder),
-        x_max=settings["x_max"],
-        px_max=settings["px_max"],
-        y_max=settings["y_max"],
-        py_max=settings["py_max"],
-        save=settings.get("save", True),
-        show=settings.get("show", False),
-    )
+    """Plot whichever invariant planes are present in details."""
+    folder = Path(folder)
+    save = bool(settings.get("save", True))
+    show = bool(settings.get("show", False))
+    if save:
+        folder.mkdir(parents=True, exist_ok=True)
 
+    results = {"folder": str(folder), "Ix": {}, "Iy": {}}
+    Ix = details.get("Ix")
+    Iy = details.get("Iy")
+
+    if Ix is not None:
+        for delta0 in settings["delta_values"]:
+            results["Ix"][delta0] = {}
+            for y0 in settings["y_values"]:
+                results["Ix"][delta0][y0] = nl.plot_invariant_section(
+                    Ix, None, state, plane="x",
+                    levels=settings["levels"],
+                    grid_points=settings["grid_points"],
+                    rmin=settings["rmin"], rmax=settings["rmax"],
+                    delta0=delta0, folder=str(folder),
+                    x_max=settings["x_max"], px_max=settings["px_max"],
+                    y_max=settings["y_max"], py_max=settings["py_max"],
+                    frozen_q0=y0,
+                    frozen_p0=settings["frozen_momentum"],
+                    save=save, show=show,
+                )
+
+    if Iy is not None:
+        for delta0 in settings["delta_values"]:
+            results["Iy"][delta0] = {}
+            for x0 in settings["x_values"]:
+                results["Iy"][delta0][x0] = nl.plot_invariant_section(
+                    None, Iy, state, plane="y",
+                    levels=settings["levels"],
+                    grid_points=settings["grid_points"],
+                    rmin=settings["rmin"], rmax=settings["rmax"],
+                    delta0=delta0, folder=str(folder),
+                    x_max=settings["x_max"], px_max=settings["px_max"],
+                    y_max=settings["y_max"], py_max=settings["py_max"],
+                    frozen_q0=x0,
+                    frozen_p0=settings["frozen_momentum"],
+                    save=save, show=show,
+                )
+    return results
 
 def magnet_snapshot(lattice):
     result = {}
@@ -409,7 +616,10 @@ def hybrid_optimize(
     v0,
     vary,
     *,
-    gradient_weight,
+    Fobj,
+    compute_ix,
+    compute_iy,
+    objective_kwargs,
     tol,
     invalid_penalty,
     sigma,
@@ -426,6 +636,12 @@ def hybrid_optimize(
         import cma
     except ImportError as exc:
         raise ImportError("Install CMA-ES with: pip install cma") from exc
+
+    requirements = objective_requirements(Fobj)
+    if "Ix" in requirements and not compute_ix:
+        raise ValueError("The selected objective requires Ix but COMPUTE_IX is False.")
+    if "Iy" in requirements and not compute_iy:
+        raise ValueError("The selected objective requires Iy but COMPUTE_IY is False.")
 
     v0 = np.asarray(v0, dtype=float)
 
@@ -446,10 +662,15 @@ def hybrid_optimize(
     start_parameters = dict(context["parameters"])
     start_snapshot = magnet_snapshot(context["lattice"])
     start_correction = context["correction"]
-    start_details = full_diagnostics(context, gradient_weight, tol)
+    start_details = full_diagnostics(
+        context, Fobj, tol,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+        objective_kwargs=objective_kwargs,
+    )
 
     start_plots = None
-    if plot_start_end_slices:
+    if plot_start_end_slices and ("Ix" in start_details or "Iy" in start_details):
         start_plots = plot_slices(
             start_details,
             context["state"],
@@ -465,9 +686,12 @@ def hybrid_optimize(
             context,
             x,
             vary,
-            gradient_weight,
-            tol,
-            invalid_penalty,
+            Fobj,
+            compute_ix=compute_ix,
+            compute_iy=compute_iy,
+            objective_kwargs=objective_kwargs,
+            tol=tol,
+            invalid_penalty=invalid_penalty,
         )
 
     options = {"verb_disp": 0}
@@ -486,28 +710,29 @@ def hybrid_optimize(
 
         solutions = es.ask()
         values = []
+        used_solutions = []
         for scaled_x in solutions:
             if time.monotonic() - cma_start >= cma_time:
                 cma_finished = True
                 break
-
             x = np.asarray(scaled_x, dtype=float) * cma_scales
             value = objective(x)
+            used_solutions.append(scaled_x)
             values.append(value)
-
             if value < best_f:
                 best_f = float(value)
                 best_x = x.copy()
 
         if cma_finished:
             break
-
-        es.tell(solutions, values)
+        es.tell(used_solutions, values)
         iteration += 1
-
         if print_every and iteration % int(print_every) == 0:
             elapsed = time.monotonic() - cma_start
-            print(f"[CMA-ES] {iteration}   {elapsed:.1f}/{cma_time:.1f} s   best J = {best_f:.6e}")
+            print(
+                f"[CMA-ES] {iteration}   {elapsed:.1f}/{cma_time:.1f} s   "
+                f"best J = {best_f:.6e}"
+            )
 
     powell_time = powell_time_fraction * cma_time
     powell_start = time.monotonic()
@@ -521,12 +746,10 @@ def hybrid_optimize(
         nonlocal powell_best_x, powell_best_f
         if time.monotonic() - powell_start >= powell_time:
             raise _PowellTimeLimit
-
         value = objective(x)
         if value < powell_best_f:
             powell_best_f = float(value)
             powell_best_x = np.asarray(x, dtype=float).copy()
-
         if time.monotonic() - powell_start >= powell_time:
             raise _PowellTimeLimit
         return value
@@ -546,15 +769,19 @@ def hybrid_optimize(
             pass
 
     x_final = powell_best_x
-
     apply_candidate(context, x_final, vary)
-    final_details = full_diagnostics(context, gradient_weight, tol)
+    final_details = full_diagnostics(
+        context, Fobj, tol,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+        objective_kwargs=objective_kwargs,
+    )
     final_parameters = dict(context["parameters"])
     final_snapshot = magnet_snapshot(context["lattice"])
     final_correction = context["correction"]
 
     final_plots = None
-    if plot_start_end_slices:
+    if plot_start_end_slices and ("Ix" in final_details or "Iy" in final_details):
         final_plots = plot_slices(
             final_details,
             context["state"],
@@ -563,6 +790,7 @@ def hybrid_optimize(
         )
 
     return {
+        "objective_function": getattr(Fobj, "__name__", Fobj.__class__.__name__),
         "x_final": np.asarray(x_final, dtype=float),
         "f_final": float(final_details["objective"]),
         "start_details": start_details,
