@@ -178,6 +178,12 @@ def optimize_a_box(
     context = api._require_context("optimize_a_box()")
     cfg = api._cfg()
 
+    if context["settings"].get("invariant_construction", "a_box") != "a_box":
+        raise ValueError(
+            "optimize_a_box() is only meaningful when "
+            "INVARIANT_CONSTRUCTION='a_box'."
+        )
+
     if importlib.util.find_spec("at") is None:
         raise ImportError(
             'optimize_a_box() requires tracking support. Install with: '
