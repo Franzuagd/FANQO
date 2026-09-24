@@ -75,6 +75,7 @@ def _clear_derived():
     STATE.Iy = None
     STATE.invariant_details = None
     STATE.optimization_result = None
+    STATE.a_box_result = None
     STATE.diagnostics.clear()
 
 
@@ -185,6 +186,10 @@ def status():
             if STATE.context is not None and "a_box" in STATE.context.get("settings", {})
             else None
         ),
+        "a_box_mode": (
+            str(getattr(cfg, "A_BOX_MODE", "fixed")).lower() if cfg else None
+        ),
+        "a_box_calibrated": STATE.a_box_result is not None,
         "Ix_available": STATE.Ix is not None,
         "Iy_available": STATE.Iy is not None,
         "optimization_completed": STATE.optimization_result is not None,
@@ -847,65 +852,197 @@ def plot_invariant_tracking(
 # QUICK A_BOX SELECTION FROM FIXED PHYSICAL TRAJECTORIES
 # =============================================================================
 
-def optimize_a_box(
-    candidates=None,
+def _surviving_tracking_a_box_seed(
+    trajectories,
+    tracking_meta,
+    current_a_box,
     *,
-    x_values=None,
+    quantile,
+    margin,
+    min_fraction,
+    optimize_mask,
+):
+    """Propose a_box from the envelope of particles that survive all turns."""
+    survivors = [
+        track
+        for track, meta in zip(trajectories, tracking_meta)
+        if bool(meta["survived"])
+    ]
+    if not survivors:
+        raise RuntimeError(
+            "No particle survived the full a_box calibration tracking interval. "
+            "Reduce A_BOX_TRACKING_COORDS_MM or A_BOX_TRACKING_TURNS."
+        )
+
+    points = np.concatenate(survivors, axis=1)
+    # FANQO polynomial order: [delta, x, y, px, py].
+    at_rows = (4, 0, 2, 1, 3)
+    envelope = np.asarray(
+        [
+            np.quantile(np.abs(points[row]), float(quantile))
+            for row in at_rows
+        ],
+        dtype=float,
+    )
+
+    current = np.asarray(current_a_box, dtype=float)
+    mask = np.asarray(optimize_mask, dtype=bool)
+    if current.shape != (5,) or mask.shape != (5,):
+        raise ValueError("a_box and A_BOX_OPTIMIZE_MASK must both have five entries.")
+
+    seed = current.copy()
+    for i in range(5):
+        if not mask[i]:
+            continue
+        proposed = float(margin) * float(envelope[i])
+        fallback = float(min_fraction) * float(current[i])
+        if not np.isfinite(proposed) or proposed <= 0.0:
+            proposed = float(current[i])
+        seed[i] = max(proposed, fallback)
+
+    return seed, envelope, len(survivors)
+
+
+def _plot_saved_ix_tracking(
+    Ix,
+    state,
+    trajectories,
+    initial,
+    orbit,
+    native,
+    x_values,
+    turns,
+    delta,
+    path,
+    *,
+    title,
+    show=False,
+):
+    """Plot Ix contours against already-saved physical trajectories."""
+    cfg = _cfg()
+    fn = _make_invariant_callable(Ix, state)
+    qmax = max(
+        float(cfg.PLOT_X_MAX),
+        1.10 * float(np.max(np.abs(x_values))),
+    )
+    pmax = float(cfg.PLOT_PX_MAX)
+    ngrid = int(getattr(cfg, "POINCARE_GRID_POINTS", cfg.PLOT_GRID_POINTS))
+
+    q = np.linspace(-qmax, qmax, ngrid)
+    p = np.linspace(-pmax, pmax, ngrid)
+    Q, P = np.meshgrid(q, p, indexing="xy")
+    Z = fn(
+        orbit[4] + delta,
+        orbit[0] + Q,
+        orbit[2],
+        orbit[1] + P,
+        orbit[3],
+    )
+    levels = np.unique(np.asarray(
+        [
+            float(fn(row[4], row[0], row[2], row[1], row[3]))
+            for row in initial
+        ],
+        dtype=float,
+    ))
+    zmin, zmax = float(np.nanmin(Z)), float(np.nanmax(Z))
+    levels = levels[(levels > zmin) & (levels < zmax)]
+    if levels.size == 0:
+        return None
+
+    plt = get_pyplot(show)
+    fig, ax = plt.subplots(figsize=(8.0, 6.5))
+    ax.contour(Q, P, Z, levels=np.sort(levels), linewidths=1.0)
+    for value, trajectory in zip(x_values, trajectories):
+        ax.scatter(
+            trajectory[0] - orbit[0],
+            trajectory[1] - orbit[1],
+            s=8,
+            alpha=0.65,
+            label=f"x0={value:g}",
+        )
+    ax.set_xlabel(r"$x-x_c$ [m]")
+    ax.set_ylabel(r"$p_x-p_{x,c}$")
+    ax.set_title(
+        f"{title}\n{native['n_cells']} cells | {turns} turns | delta={delta:g}"
+    )
+    ax.set_xlim(-qmax, qmax)
+    ax.set_ylim(-pmax, pmax)
+    ax.grid(alpha=0.2)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=240)
+    if show:
+        plt.show()
+    plt.close(fig)
+    return path
+
+
+def optimize_a_box(
+    *,
+    coords_mm=None,
+    steps=None,
     turns=None,
     delta=None,
     make_active=True,
 ):
-    """Choose a_box by Ix conservation on one fixed physical tracking set."""
+    """Calibrate a_box once from survivor tracking plus a short CMA-ES search.
+
+    Physical particles are tracked exactly once.  Their surviving trajectories
+    define a physically scaled seed box.  A short CMA-ES search then changes
+    only a_box while scoring how nearly Ix is conserved on those same fixed
+    trajectories.  The winning box is rebuilt fully once and can then be used
+    for the complete magnet optimization.
+    """
     context = _require_context("optimize_a_box()")
     cfg = _cfg()
 
-    if candidates is None:
-        candidates = getattr(cfg, "A_BOX_CANDIDATES", None)
-    if candidates is None:
-        raise ValueError(
-            "Define A_BOX_CANDIDATES in general_config.py or pass candidates=..."
+    if importlib.util.find_spec("at") is None:
+        raise ImportError(
+            'optimize_a_box() requires tracking support. Install with: '
+            'python -m pip install -e ".[tracking]"'
         )
-    candidates = [np.asarray(value, dtype=float) for value in candidates]
-    if not candidates:
-        raise ValueError("A_BOX_CANDIDATES cannot be empty.")
+    if importlib.util.find_spec("cma") is None:
+        raise ImportError("optimize_a_box() requires cma.")
 
-    expected = len(context["settings"]["variables"])
-    for candidate in candidates:
-        if candidate.shape != (expected,):
-            raise ValueError(f"Every a_box candidate must have shape ({expected},).")
-        if not np.all(np.isfinite(candidate)) or np.any(candidate <= 0.0):
-            raise ValueError("Every a_box value must be positive and finite.")
+    current_a_box = np.asarray(context["state"]["a_box"], dtype=float)
+    if current_a_box.shape != (5,):
+        raise ValueError("The current FANQO model expects a five-entry a_box.")
 
-    if x_values is None:
-        x_values = getattr(
-            cfg,
-            "A_BOX_TRACKING_X_VALUES",
-            getattr(cfg, "POINCARE_X_VALUES", ()),
-        )
-    x_values = np.asarray(x_values, dtype=float).reshape(-1)
-    if x_values.size == 0:
-        raise ValueError(
-            "A_BOX_TRACKING_X_VALUES must contain at least one x value."
-        )
-
+    coords_mm = list(
+        getattr(cfg, "A_BOX_TRACKING_COORDS_MM", cfg.FMA_COORDS_MM)
+        if coords_mm is None else coords_mm
+    )
+    steps = list(
+        getattr(cfg, "A_BOX_TRACKING_STEPS", [10, 10])
+        if steps is None else steps
+    )
     turns = int(
-        getattr(cfg, "A_BOX_TRACKING_TURNS", 256) if turns is None else turns
+        getattr(cfg, "A_BOX_TRACKING_TURNS", 128)
+        if turns is None else turns
     )
     delta = float(
-        getattr(cfg, "A_BOX_TRACKING_DELTA", 0.0) if delta is None else delta
-    )
-    floor_fraction = float(
-        getattr(cfg, "A_BOX_INVARIANCE_FLOOR_FRACTION", 1.0e-8)
+        getattr(cfg, "A_BOX_TRACKING_DELTA", 0.0)
+        if delta is None else delta
     )
     pool_size = getattr(cfg, "FMA_POOL_SIZE", None)
 
-    # Track once. These physical trajectories do not depend on a_box.
+    xs_mm, ys_mm = _fma_grid(coords_mm, steps)
+    launch_pairs = [(float(x), float(y)) for y in ys_mm for x in xs_mm]
+
     ring, orbit, native = _physical_tracking_ring(context)
-    initial = np.repeat(orbit.reshape(1, 6), len(x_values), axis=0)
+    initial = np.repeat(orbit.reshape(1, 6), len(launch_pairs), axis=0)
     initial[:, 4] += delta
-    initial[:, 0] += x_values
+    initial[:, 0] += 1.0e-3 * np.asarray([p[0] for p in launch_pairs])
+    initial[:, 2] += 1.0e-3 * np.asarray([p[1] for p in launch_pairs])
+
     trajectories, tracking_meta = _track_initial_conditions(
-        ring, initial, turns, pool_size=pool_size
+        ring,
+        initial,
+        turns,
+        pool_size=pool_size,
     )
 
     output_dir = Path(
@@ -915,171 +1052,268 @@ def optimize_a_box(
     tracking_path = output_dir / "a_box_fixed_tracking.npz"
     np.savez_compressed(
         tracking_path,
-        x_values=x_values,
+        launch_pairs_mm=np.asarray(launch_pairs, dtype=float),
         orbit=orbit,
         delta=np.asarray([delta]),
-        **{f"track_{i:03d}": track for i, track in enumerate(trajectories)},
+        survived=np.asarray(
+            [bool(meta["survived"]) for meta in tracking_meta],
+            dtype=bool,
+        ),
+        **{f"track_{i:04d}": track for i, track in enumerate(trajectories)},
     )
 
-    scores = []
-    diagnostics = []
+    optimize_mask = np.asarray(
+        getattr(cfg, "A_BOX_OPTIMIZE_MASK", [False, True, True, True, True]),
+        dtype=bool,
+    )
+    seed, survivor_envelope, survivor_count = _surviving_tracking_a_box_seed(
+        trajectories,
+        tracking_meta,
+        current_a_box,
+        quantile=float(getattr(cfg, "A_BOX_SEED_QUANTILE", 0.98)),
+        margin=float(getattr(cfg, "A_BOX_SEED_MARGIN", 1.15)),
+        min_fraction=float(getattr(cfg, "A_BOX_SEED_MIN_FRACTION", 0.20)),
+        optimize_mask=optimize_mask,
+    )
+
+    # Only complete survivors are used to fit the invariant box.
+    survivor_trajectories = [
+        track
+        for track, meta in zip(trajectories, tracking_meta)
+        if bool(meta["survived"])
+    ]
+
     tol = float(cfg.LEAST_SQUARES_TOL)
-
-    # Build the current Ix once and compare its predicted level sets against the
-    # exact same saved trajectories. No second physical tracking is performed.
-    baseline = opt.compute_requested_invariants(
-        context,
-        tol,
-        compute_ix=True,
-        compute_iy=False,
+    floor_fraction = float(
+        getattr(cfg, "A_BOX_INVARIANCE_FLOOR_FRACTION", 1.0e-8)
     )
-    baseline_ix = baseline["Ix"]
-    baseline_fn = _make_invariant_callable(baseline_ix, context["state"])
-    baseline_plot_path = None
-    save_plot, show_plot = _plot_flags()
-    if save_plot or show_plot:
-        qmax = max(
-            float(cfg.PLOT_X_MAX),
-            1.10 * float(np.max(np.abs(x_values))),
-        )
-        pmax = float(cfg.PLOT_PX_MAX)
-        ngrid = int(getattr(cfg, "POINCARE_GRID_POINTS", cfg.PLOT_GRID_POINTS))
-        q = np.linspace(-qmax, qmax, ngrid)
-        p = np.linspace(-pmax, pmax, ngrid)
-        Q, P = np.meshgrid(q, p, indexing="xy")
-        Z = baseline_fn(
-            orbit[4] + delta,
-            orbit[0] + Q,
-            orbit[2],
-            orbit[1] + P,
-            orbit[3],
-        )
-        levels = np.asarray(
-            [
-                float(
-                    baseline_fn(
-                        row[4], row[0], row[2], row[1], row[3]
-                    )
-                )
-                for row in initial
-            ],
-            dtype=float,
-        )
-        levels = np.unique(levels)
-        zmin, zmax = float(np.nanmin(Z)), float(np.nanmax(Z))
-        levels = levels[(levels > zmin) & (levels < zmax)]
 
-        if levels.size:
-            plt = get_pyplot(show_plot)
-            fig, ax = plt.subplots(figsize=(8.0, 6.5))
-            ax.contour(Q, P, Z, levels=np.sort(levels), linewidths=1.0)
-            for value, trajectory in zip(x_values, trajectories):
-                ax.scatter(
-                    trajectory[0] - orbit[0],
-                    trajectory[1] - orbit[1],
-                    s=8,
-                    alpha=0.65,
-                    label=f"x0={value:g}",
-                )
-            ax.set_xlabel(r"$x-x_c$ [m]")
-            ax.set_ylabel(r"$p_x-p_{x,c}$")
-            ax.set_title(
-                "Baseline Ix contours vs. fixed Poincare tracking\n"
-                f"{native['n_cells']} cells | {turns} turns | delta={delta:g}"
+    # Expensive nonlinear transfer is constructed once in the current basis.
+    reference_transfer, _, _ = opt.nonlinear_transfer(context, tol)
+
+    history = []
+    penalty = float(getattr(cfg, "INVALID_PENALTY", 1.0e30))
+
+    def score_box(a_box):
+        try:
+            data = opt.a_box_objective_data(
+                context,
+                reference_transfer,
+                np.asarray(a_box, dtype=float),
+                survivor_trajectories,
+                tol,
             )
-            ax.set_xlim(-qmax, qmax)
-            ax.set_ylim(-pmax, pmax)
-            ax.grid(alpha=0.2)
-            ax.legend(fontsize=8)
-            fig.tight_layout()
-            if save_plot:
-                baseline_plot_path = output_dir / "a_box_baseline_poincare.png"
-                fig.savefig(baseline_plot_path, dpi=240)
-            if show_plot:
-                plt.show()
-            plt.close(fig)
+            score, diagnostics = obj.tracked_ix_invariance(
+                data,
+                floor_fraction=floor_fraction,
+            )
+            score = float(score)
+            if not np.isfinite(score):
+                score = penalty
+                diagnostics = {}
+        except (
+            ValueError,
+            KeyError,
+            OverflowError,
+            FloatingPointError,
+            np.linalg.LinAlgError,
+        ):
+            score = penalty
+            diagnostics = {}
 
-    for candidate in candidates:
-        temporary = opt.context_with_a_box(context, candidate)
-        details = opt.full_diagnostics(
-            temporary,
-            obj.tracked_ix_invariance,
-            tol,
-            compute_ix=True,
-            compute_iy=False,
-            objective_kwargs={"floor_fraction": floor_fraction},
-            extra_data={"trajectories": trajectories},
-        )
-        scores.append(float(details["objective"]))
-        diagnostics.append({
-            key: value
-            for key, value in details.items()
-            if key not in {"Ix", "Iy", "Sx", "Sy", "transfer"}
+        history.append({
+            "a_box": np.asarray(a_box, dtype=float).copy(),
+            "score": float(score),
         })
+        return float(score), diagnostics
 
-    scores_array = np.asarray(scores, dtype=float)
-    finite = np.isfinite(scores_array)
-    if not np.any(finite):
-        raise RuntimeError(
-            "Every a_box candidate produced an invalid invariance score."
+    seed_score, seed_diagnostics = score_box(seed)
+    best_a_box = seed.copy()
+    best_score = float(seed_score)
+    best_diagnostics = dict(seed_diagnostics)
+
+    active = np.flatnonzero(optimize_mask)
+    if active.size:
+        import cma
+
+        factor_bounds = tuple(
+            getattr(cfg, "A_BOX_CMA_FACTOR_BOUNDS", (0.5, 2.0))
         )
-    finite_indices = np.flatnonzero(finite)
-    best_index = int(finite_indices[np.argmin(scores_array[finite])])
-    best_a_box = candidates[best_index].copy()
+        if len(factor_bounds) != 2:
+            raise ValueError("A_BOX_CMA_FACTOR_BOUNDS must contain [min_factor, max_factor].")
+        lower_factor, upper_factor = map(float, factor_bounds)
+        if not (0.0 < lower_factor < upper_factor):
+            raise ValueError("A_BOX_CMA_FACTOR_BOUNDS must be positive and increasing.")
 
+        lower = np.log(lower_factor)
+        upper = np.log(upper_factor)
+        sigma = float(getattr(cfg, "A_BOX_CMA_SIGMA", 0.25))
+        popsize = int(getattr(cfg, "A_BOX_CMA_POPSIZE", 6))
+        max_evals = int(getattr(cfg, "A_BOX_CMA_MAX_EVALS", 30))
+
+        options = {
+            "verb_disp": 0,
+            "verbose": -9,
+            "popsize": popsize,
+            "maxfevals": max_evals,
+            "bounds": [
+                [lower] * len(active),
+                [upper] * len(active),
+            ],
+        }
+        es = cma.CMAEvolutionStrategy(
+            np.zeros(len(active), dtype=float),
+            sigma,
+            options,
+        )
+
+        while not es.stop():
+            solutions = es.ask()
+            values = []
+            for u in solutions:
+                candidate = seed.copy()
+                candidate[active] = seed[active] * np.exp(
+                    np.asarray(u, dtype=float)
+                )
+                score, diagnostics = score_box(candidate)
+                values.append(score)
+                if score < best_score:
+                    best_score = float(score)
+                    best_a_box = candidate.copy()
+                    best_diagnostics = dict(diagnostics)
+            es.tell(solutions, values)
+
+    # Build the winning nonlinear state exactly once for the subsequent main
+    # optimization. No future magnet candidate changes a_box.
     if make_active:
         opt.set_context_a_box(context, best_a_box)
+        configured_ix = bool(getattr(cfg, "COMPUTE_IX", True))
         configured_iy = bool(getattr(cfg, "COMPUTE_IY", False))
-        active = opt.compute_requested_invariants(
+        active_invariants = opt.compute_requested_invariants(
             context,
             tol,
-            compute_ix=True,
+            compute_ix=configured_ix,
             compute_iy=configured_iy,
         )
-        active.update({
-            "objective": float(scores_array[best_index]),
+        active_invariants.update({
+            "objective": best_score,
             "objective_name": "tracked_ix_invariance",
             "selected_a_box": best_a_box.copy(),
-            **diagnostics[best_index],
+            "a_box_seed": seed.copy(),
+            "survivor_count": survivor_count,
+            **best_diagnostics,
         })
-        _set_invariants(active)
-        STATE.source = "a_box_optimized"
+        _set_invariants(active_invariants)
+        STATE.source = "a_box_calibrated"
+
+    save_plot, show_plot = _plot_flags()
+    seed_plot_path = None
+    best_plot_path = None
+    if save_plot or show_plot:
+        x_launch_m = 1.0e-3 * np.asarray([p[0] for p in launch_pairs])
+        seed_data = opt.a_box_objective_data(
+            context,
+            reference_transfer,
+            seed,
+            trajectories,
+            tol,
+        )
+        best_data = opt.a_box_objective_data(
+            context,
+            reference_transfer,
+            best_a_box,
+            trajectories,
+            tol,
+        )
+        if save_plot:
+            seed_plot_path = output_dir / "a_box_seed_poincare.png"
+            best_plot_path = output_dir / "a_box_best_poincare.png"
+        else:
+            # The helper requires a path because its normal use is reproducible
+            # research output; temporary paths are kept inside the output folder.
+            seed_plot_path = output_dir / "a_box_seed_poincare.png"
+            best_plot_path = output_dir / "a_box_best_poincare.png"
+        _plot_saved_ix_tracking(
+            seed_data["Ix"],
+            seed_data["state"],
+            trajectories,
+            initial,
+            orbit,
+            native,
+            x_launch_m,
+            turns,
+            delta,
+            seed_plot_path,
+            title="Seed a_box: Ix contours vs. fixed tracking",
+            show=show_plot,
+        )
+        _plot_saved_ix_tracking(
+            best_data["Ix"],
+            best_data["state"],
+            trajectories,
+            initial,
+            orbit,
+            native,
+            x_launch_m,
+            turns,
+            delta,
+            best_plot_path,
+            title="Optimized a_box: Ix contours vs. fixed tracking",
+            show=show_plot,
+        )
 
     summary = {
-        "best_index": best_index,
-        "best_a_box": best_a_box,
-        "best_score": float(scores_array[best_index]),
-        "candidates": np.asarray(candidates, dtype=float),
-        "scores": scores_array,
-        "diagnostics": diagnostics,
-        "x_values": x_values,
-        "turns": turns,
-        "delta": delta,
+        "initial_a_box": current_a_box.copy(),
+        "survivor_seed_a_box": seed.copy(),
+        "survivor_envelope": survivor_envelope.copy(),
+        "survivor_count": int(survivor_count),
+        "total_particles": int(len(trajectories)),
+        "best_a_box": best_a_box.copy(),
+        "seed_score": float(seed_score),
+        "best_score": float(best_score),
+        "history": history,
         "tracking": tracking_meta,
         "tracking_path": tracking_path,
-        "baseline_plot_path": baseline_plot_path,
+        "seed_plot_path": seed_plot_path,
+        "best_plot_path": best_plot_path,
+        "turns": turns,
+        "delta": delta,
+        "coords_mm": coords_mm,
+        "steps": steps,
         "make_active": bool(make_active),
         "native": native,
     }
 
     import json
-    summary_path = output_dir / "a_box_scan.json"
+    summary_path = output_dir / "a_box_calibration.json"
     payload = {
-        "best_index": best_index,
+        "initial_a_box": current_a_box.tolist(),
+        "survivor_seed_a_box": seed.tolist(),
+        "survivor_envelope": survivor_envelope.tolist(),
+        "survivor_count": int(survivor_count),
+        "total_particles": int(len(trajectories)),
         "best_a_box": best_a_box.tolist(),
-        "best_score": float(scores_array[best_index]),
-        "candidates": [c.tolist() for c in candidates],
-        "scores": scores_array.tolist(),
-        "x_values": x_values.tolist(),
+        "seed_score": float(seed_score),
+        "best_score": float(best_score),
+        "history": [
+            {"a_box": item["a_box"].tolist(), "score": item["score"]}
+            for item in history
+        ],
+        "tracking_path": str(tracking_path),
+        "seed_plot_path": (
+            None if seed_plot_path is None else str(seed_plot_path)
+        ),
+        "best_plot_path": (
+            None if best_plot_path is None else str(best_plot_path)
+        ),
         "turns": turns,
         "delta": delta,
-        "tracking_path": str(tracking_path),
-        "baseline_plot_path": (
-            None if baseline_plot_path is None else str(baseline_plot_path)
-        ),
+        "coords_mm": list(map(float, coords_mm)),
+        "steps": list(map(int, steps)),
     }
     summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     summary["summary_path"] = summary_path
+    STATE.a_box_result = summary
     return summary
 
 # =============================================================================
@@ -1285,6 +1519,12 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
     if not callable(Fobj):
         raise TypeError("Fobj must be a callable objective function.")
     opt.objective_requirements(Fobj)
+
+    a_box_mode = str(getattr(cfg, "A_BOX_MODE", "fixed")).lower()
+    if a_box_mode not in {"fixed", "auto"}:
+        raise ValueError("A_BOX_MODE must be 'fixed' or 'auto'.")
+    if a_box_mode == "auto" and STATE.a_box_result is None:
+        optimize_a_box(make_active=True)
 
     if importlib.util.find_spec("cma") is None:
         raise ImportError(
