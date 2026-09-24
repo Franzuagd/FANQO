@@ -210,7 +210,9 @@ def rescaled_state_for_a_box(reference_state, data, a_box):
     state["a_box"] = np.asarray(a_box, dtype=float).copy()
     state["linear_cs0"] = cs0.copy()
     state["D_x"] = nl.build_derivative_matrix(state, 1)
+    state["D_y"] = nl.build_derivative_matrix(state, 2)
     state["D_px"] = nl.build_derivative_matrix(state, 3)
+    state["D_py"] = nl.build_derivative_matrix(state, 4)
     return state
 
 
@@ -296,7 +298,9 @@ def _refresh_nonlinear_normalization(state, data):
     state["C"] = epsilon * math.sqrt(arg)
     state["linear_cs0"] = cs0.copy()
     state["D_x"] = nl.build_derivative_matrix(state, 1)
+    state["D_y"] = nl.build_derivative_matrix(state, 2)
     state["D_px"] = nl.build_derivative_matrix(state, 3)
+    state["D_py"] = nl.build_derivative_matrix(state, 4)
 
 
 def apply_candidate(context, v, vary):
@@ -538,7 +542,7 @@ def _snapshot_mutable_context(context):
     state = context["state"]
     state_values = {
         key: _copy_value(state[key])
-        for key in ("C", "linear_cs0", "D_x", "D_px")
+        for key in ("C", "linear_cs0", "D_x", "D_y", "D_px", "D_py")
         if key in state
     }
     return {
