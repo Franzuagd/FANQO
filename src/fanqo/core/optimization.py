@@ -51,6 +51,7 @@ def create_context(
     variables,
     field_symbols,
     n_planes=2,
+    invariant_construction="a_box",
 ):
     magnets, lattice, data, correction, p = lin.prepare_lattice(
         parameters=parameters,
@@ -67,7 +68,7 @@ def create_context(
         step=step,
     )
 
-    state = nl.initialize_nonlinear(
+    state = nl.initialize_nonlinear_for_method(
         data,
         m=m,
         d=d,
@@ -76,6 +77,7 @@ def create_context(
         variables=variables,
         field_symbols=field_symbols,
         n=n_planes,
+        invariant_construction=invariant_construction,
     )
 
     return {
@@ -109,13 +111,14 @@ def create_context(
             "variables": tuple(variables),
             "field_symbols": tuple(field_symbols),
             "n_planes": int(n_planes),
+            "invariant_construction": str(invariant_construction).lower(),
         },
     }
 
 
 def _build_nonlinear_state(context, a_box):
     settings = context["settings"]
-    return nl.initialize_nonlinear(
+    return nl.initialize_nonlinear_for_method(
         context["data"],
         m=settings["m"],
         d=settings["d"],
@@ -124,11 +127,16 @@ def _build_nonlinear_state(context, a_box):
         variables=settings["variables"],
         field_symbols=settings["field_symbols"],
         n=settings["n_planes"],
+        invariant_construction=settings["invariant_construction"],
     )
 
 
 def context_with_a_box(context, a_box):
     """Return an analysis context with the same lattice and a fresh a_box."""
+    if context["settings"].get("invariant_construction", "a_box") != "a_box":
+        raise ValueError(
+            "a_box recalibration is only defined for INVARIANT_CONSTRUCTION='a_box'."
+        )
     a_box = np.asarray(a_box, dtype=float)
     expected = len(context["settings"]["variables"])
     if a_box.shape != (expected,):
@@ -264,6 +272,11 @@ def a_box_objective_data(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
+    if state.get("invariant_construction", "a_box") == "advisor_eigen":
+        state["linear_cs0"] = cs0.copy()
+        # C is the identity in advisor mode, so coefficient derivatives do not
+        # change when the linear Twiss parameters change.
+        return
     bx0, ax0, gx0, _, _, _ = cs0
 
     vec_to_idx = state["vec_to_idx"]
@@ -438,13 +451,16 @@ def prepare_objective_data(
     state = context["state"]
     result = {"state": state, "context": context, **extra_data}
 
-    need_quadratic = bool(requirements & {"Sx", "Sy", "Ix", "Iy"})
+    method = state.get("invariant_construction", "a_box")
+    need_quadratic = bool(requirements & {"Sx", "Sy"})
+    if method == "a_box":
+        need_quadratic = need_quadratic or bool(requirements & {"Ix", "Iy"})
     Sx = Sy = None
     if need_quadratic:
         Sx, Sy = nl.quadratic_invariants(context["data"], state)
-        if "Sx" in requirements or "Ix" in requirements:
+        if "Sx" in requirements or (method == "a_box" and "Ix" in requirements):
             result["Sx"] = Sx
-        if "Sy" in requirements or "Iy" in requirements:
+        if "Sy" in requirements or (method == "a_box" and "Iy" in requirements):
             result["Sy"] = Sy
 
     need_transfer = bool(requirements & {"Ix", "Iy", "transfer", "tnn", "tnq"})
@@ -456,10 +472,21 @@ def prepare_objective_data(
             result["tnn"] = tnn
         if "tnq" in requirements:
             result["tnq"] = tnq
+        method = state.get("invariant_construction", "a_box")
         if "Ix" in requirements:
-            result["Ix"] = _solve_invariant(Sx, tnn, tnq, state, tol)
+            if method == "advisor_eigen":
+                result["Ix"], result["Ix_construction_details"] = (
+                    nl.advisor_eigen_invariant(transfer, state, plane="x")
+                )
+            else:
+                result["Ix"] = _solve_invariant(Sx, tnn, tnq, state, tol)
         if "Iy" in requirements:
-            result["Iy"] = _solve_invariant(Sy, tnn, tnq, state, tol)
+            if method == "advisor_eigen":
+                result["Iy"], result["Iy_construction_details"] = (
+                    nl.advisor_eigen_invariant(transfer, state, plane="y")
+                )
+            else:
+                result["Iy"] = _solve_invariant(Sy, tnn, tnq, state, tol)
 
     return result
 
@@ -594,7 +621,10 @@ def full_diagnostics(
         "objective_name": getattr(Fobj, "__name__", Fobj.__class__.__name__),
         **diagnostics,
     }
-    for key in ("Ix", "Iy", "Sx", "Sy", "transfer"):
+    for key in (
+        "Ix", "Iy", "Sx", "Sy", "transfer",
+        "Ix_construction_details", "Iy_construction_details",
+    ):
         if key in data:
             details[key] = data[key]
 
