@@ -164,14 +164,6 @@ def reference_fluctuation_index(
 reference_fluctuation_index.requires = {"Ix"}
 
 
-# Backward-compatible public name. Other repository files already import it,
-# and this task is intentionally restricted to this module.
-def advisor_fluctuation_index(data, **kwargs):
-    return reference_fluctuation_index(data, **kwargs)
-
-
-advisor_fluctuation_index.requires = {"Ix"}
-
 
 # =============================================================================
 # 2. OBJECTIVE CONFIGURATION HELPER
