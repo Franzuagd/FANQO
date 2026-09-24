@@ -17,6 +17,7 @@ from .config_loader import load_general_config, load_selected_lattice, analysis_
 from .core import linear as lin
 from .core import nonlinear as nl
 from .core import optimization as opt
+from .core import objective_functions as obj
 from .plotting import get_pyplot
 
 
@@ -32,17 +33,41 @@ def _require_context(action):
     return STATE.context
 
 
-def _require_invariants(action):
+def _require_invariant(action, plane=None):
     context = _require_context(action)
-    if STATE.Ix is None or STATE.Iy is None:
-        raise RuntimeError(f"{action} requires Ix and Iy. Run compute_invariants() first.")
+    if plane is None:
+        if STATE.Ix is None and STATE.Iy is None:
+            raise RuntimeError(
+                f"{action} requires at least one invariant. Run compute_invariants() first."
+            )
+        return context
+
+    plane = str(plane).lower()
+    if plane == "x":
+        if STATE.Ix is None:
+            raise RuntimeError(
+                f"{action} requires Ix. Enable COMPUTE_IX and run compute_invariants()."
+            )
+    elif plane == "y":
+        if STATE.Iy is None:
+            raise RuntimeError(
+                f"{action} requires Iy. Enable COMPUTE_IY and run compute_invariants()."
+            )
+    else:
+        raise ValueError("plane must be 'x' or 'y'.")
     return context
 
 
 def _set_invariants(details):
     STATE.invariant_details = details
-    STATE.Ix = np.asarray(details["Ix"], dtype=float).copy()
-    STATE.Iy = np.asarray(details["Iy"], dtype=float).copy()
+    STATE.Ix = (
+        np.asarray(details["Ix"], dtype=float).copy()
+        if details.get("Ix") is not None else None
+    )
+    STATE.Iy = (
+        np.asarray(details["Iy"], dtype=float).copy()
+        if details.get("Iy") is not None else None
+    )
 
 
 def _clear_derived():
@@ -155,6 +180,11 @@ def status():
         "analysis_cells": int(cfg.ANALYSIS_CELLS) if cfg else None,
         "context_loaded": STATE.context is not None,
         "parameters_state": STATE.source,
+        "active_a_box": (
+            np.asarray(STATE.context["settings"].get("a_box"), dtype=float).copy()
+            if STATE.context is not None and "a_box" in STATE.context.get("settings", {})
+            else None
+        ),
         "Ix_available": STATE.Ix is not None,
         "Iy_available": STATE.Iy is not None,
         "optimization_completed": STATE.optimization_result is not None,
@@ -269,64 +299,110 @@ def plot_linear(*, file_name=None, save=None, show=None):
 # =============================================================================
 
 def compute_invariants():
-    cfg = _cfg(); context = _require_context("compute_invariants()")
-    details = opt.full_diagnostics(context, cfg.GRADIENT_WEIGHT, cfg.LEAST_SQUARES_TOL)
+    """Compute only the invariant planes enabled in general_config.py."""
+    cfg = _cfg()
+    context = _require_context("compute_invariants()")
+    compute_ix = bool(getattr(cfg, "COMPUTE_IX", True))
+    compute_iy = bool(getattr(cfg, "COMPUTE_IY", False))
+    if not compute_ix and not compute_iy:
+        raise ValueError("At least one of COMPUTE_IX or COMPUTE_IY must be True.")
+
+    details = opt.compute_requested_invariants(
+        context,
+        cfg.LEAST_SQUARES_TOL,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+    )
     _set_invariants(details)
-    return STATE.Ix.copy(), STATE.Iy.copy()
+    return (
+        None if STATE.Ix is None else STATE.Ix.copy(),
+        None if STATE.Iy is None else STATE.Iy.copy(),
+    )
 
 
 def get_Ix():
-    _require_invariants("get_Ix()"); return STATE.Ix.copy()
+    _require_invariant("get_Ix()", "x")
+    return STATE.Ix.copy()
 
 
 def get_Iy():
-    _require_invariants("get_Iy()"); return STATE.Iy.copy()
+    _require_invariant("get_Iy()", "y")
+    return STATE.Iy.copy()
 
 
 def invariant_polynomial(plane="x"):
-    context = _require_invariants("invariant_polynomial()")
     plane = str(plane).lower()
-    if plane not in ("x","y"): raise ValueError("plane must be 'x' or 'y'.")
-    vec = STATE.Ix if plane=="x" else STATE.Iy
+    context = _require_invariant("invariant_polynomial()", plane)
+    vec = STATE.Ix if plane == "x" else STATE.Iy
     st = context["state"]
-    return nl.vector_to_poly(np.asarray(vec)*np.asarray(st["C"]), st["monomial_basis"])
+    return nl.vector_to_poly(
+        np.asarray(vec) * np.asarray(st["C"]),
+        st["monomial_basis"],
+    )
 
 
-def _make_ix_callable(Ix, state):
-    Ix=np.asarray(Ix,float); C=np.asarray(state["C"],float)
-    if len(Ix)!=len(C): raise ValueError("Ix and state['C'] must have the same length.")
-    terms=[(float(c), tuple(map(int,state["idx_to_vec"][k])))
-           for k,c in enumerate(Ix*C) if c!=0.0]
-    def evaluate(delta,x,y,px,py):
-        arrays=np.broadcast_arrays(*[np.asarray(v,float) for v in (delta,x,y,px,py)])
-        result=np.zeros(arrays[0].shape,float)
-        for coeff,powers in terms:
-            term=coeff
-            for values,power in zip(arrays,powers):
-                if power: term=term*values**power
-            result=result+term
+def _make_invariant_callable(I, state):
+    I = np.asarray(I, float)
+    C = np.asarray(state["C"], float)
+    if len(I) != len(C):
+        raise ValueError("Invariant vector and state['C'] must have the same length.")
+
+    terms = [
+        (float(c), tuple(map(int, state["idx_to_vec"][k])))
+        for k, c in enumerate(I * C)
+        if c != 0.0
+    ]
+
+    def evaluate(delta, x, y, px, py):
+        arrays = np.broadcast_arrays(
+            *[np.asarray(v, float) for v in (delta, x, y, px, py)]
+        )
+        result = np.zeros(arrays[0].shape, float)
+        for coeff, powers in terms:
+            term = coeff
+            for values, power in zip(arrays, powers):
+                if power:
+                    term = term * values ** power
+            result = result + term
         return result
+
     return evaluate
 
 
+def _make_ix_callable(Ix, state):
+    return _make_invariant_callable(Ix, state)
+
+
 def ix_callable():
-    context=_require_invariants("ix_callable()")
-    return _make_ix_callable(STATE.Ix, context["state"])
+    context = _require_invariant("ix_callable()", "x")
+    return _make_invariant_callable(STATE.Ix, context["state"])
+
+
+def iy_callable():
+    context = _require_invariant("iy_callable()", "y")
+    return _make_invariant_callable(STATE.Iy, context["state"])
 
 
 def nonlinear_checks():
-    context=_require_context("nonlinear_checks()")
-    checks=nl.check_nonlinear_state(context["state"])
+    context = _require_context("nonlinear_checks()")
+    checks = nl.check_nonlinear_state(context["state"])
     print("="*72); print("NONLINEAR CHECKS"); print("="*72)
-    for k,v in checks.items(): print(f"{k:<30}: {v}")
+    for k, v in checks.items():
+        print(f"{k:<30}: {v}")
     return checks
 
 
 def plot_invariant(*, folder=None, save=None, show=None):
-    context=_require_invariants("plot_invariant()"); cfg=_cfg()
+    context = _require_invariant("plot_invariant()")
+    cfg = _cfg()
     save, show = _plot_flags(save, show)
-    folder=_resolve(cfg.PLOT_ROOT)/"current" if folder is None else _resolve(folder)
-    return opt.plot_slices({"Ix":STATE.Ix,"Iy":STATE.Iy}, context["state"], Path(folder), _slice_settings(save, show))
+    folder = _resolve(cfg.PLOT_ROOT)/"current" if folder is None else _resolve(folder)
+    return opt.plot_slices(
+        {"Ix": STATE.Ix, "Iy": STATE.Iy},
+        context["state"],
+        Path(folder),
+        _slice_settings(save, show),
+    )
 
 
 # =============================================================================
@@ -521,7 +597,7 @@ def _tracking_plots(fmap,ix_data,native,out,label,coords,delta,save,show):
 
 def run_fma(*, stage="current", quick=False):
     """Run FMA and full-ring Ix tracking using the active lattice and Ix."""
-    context=_require_invariants("run_fma()"); cfg=_cfg()
+    context=_require_invariant("run_fma()", "x"); cfg=_cfg()
     if importlib.util.find_spec("at") is None:
         raise ImportError('Install tracking support with: python -m pip install -e ".[tracking]"')
     import at
@@ -561,6 +637,373 @@ def run_fma(*, stage="current", quick=False):
     return result
 
 
+
+# =============================================================================
+# INVARIANT CONTOURS + PHYSICAL POINCARE TRACKING
+# =============================================================================
+
+def _track_initial_conditions(ring, initial_conditions, turns, pool_size=None):
+    """Track full-ring Poincare points for multiple initial conditions."""
+    from at.tracking import patpass
+
+    z0 = np.asarray(initial_conditions, dtype=float)
+    if z0.ndim != 2 or z0.shape[1] != 6:
+        raise ValueError("initial_conditions must have shape (N, 6).")
+    turns = int(turns)
+    if turns < 1:
+        raise ValueError("turns must be positive.")
+
+    kwargs = {"losses": True}
+    if pool_size is not None:
+        kwargs["pool_size"] = int(pool_size)
+
+    tracked, loss = patpass(
+        ring,
+        np.asfortranarray(z0.T),
+        turns,
+        **kwargs,
+    )
+    tracked = np.asarray(tracked, dtype=float)
+    if tracked.ndim == 4:
+        tracks = tracked[:, :, 0, :]
+    elif tracked.ndim == 3:
+        tracks = tracked
+    else:
+        raise RuntimeError(f"Unexpected patpass result shape {tracked.shape}.")
+
+    lost = np.asarray(loss.get("islost", np.zeros(len(z0), bool)), dtype=bool)
+    trajectories = []
+    metadata = []
+    for i in range(len(z0)):
+        part = tracks[:, i, :]
+        finite = np.all(np.isfinite(part), axis=0)
+        completed = int(np.flatnonzero(~finite)[0]) if not np.all(finite) else turns
+        completed = max(0, min(completed, turns))
+        trajectory = np.concatenate(
+            (z0[i].reshape(6, 1), part[:, :completed]),
+            axis=1,
+        )
+        trajectories.append(trajectory)
+        metadata.append({
+            "completed_turns": completed,
+            "survived": bool(completed == turns and not lost[i]),
+        })
+    return trajectories, metadata
+
+
+def _physical_tracking_ring(context):
+    """Build the physical 360-degree ring used by FMA/tracking."""
+    if importlib.util.find_spec("at") is None:
+        raise ImportError(
+            'Tracking support is required. Install with: python -m pip install -e ".[tracking]"'
+        )
+    import at
+    from at.physics import find_orbit
+
+    native = _prepare_physical_ring(context["parameters"])
+    if not np.isclose(abs(native["total_bend_deg"]), 360.0, atol=1e-6):
+        raise ValueError(
+            f"Physical tracking ring bends {native['total_bend_deg']} deg, not 360."
+        )
+    ring = _build_at_ring(native, at)
+    orbit, _ = find_orbit(ring)
+    return ring, np.asarray(orbit, dtype=float).reshape(6), native
+
+
+def plot_invariant_tracking(
+    plane="x",
+    *,
+    values=None,
+    turns=None,
+    delta=None,
+    file_name=None,
+    save=None,
+    show=None,
+):
+    """Overlay invariant level sets with real full-ring Poincare points."""
+    plane = str(plane).lower()
+    context = _require_invariant("plot_invariant_tracking()", plane)
+    cfg = _cfg()
+    save, show = _plot_flags(save, show)
+
+    if values is None:
+        name = "POINCARE_X_VALUES" if plane == "x" else "POINCARE_Y_VALUES"
+        values = getattr(cfg, name, ())
+    values = np.asarray(values, dtype=float).reshape(-1)
+    if values.size == 0:
+        raise ValueError(f"No Poincare {plane}-values were supplied.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Poincare initial values must be finite.")
+
+    turns = int(getattr(cfg, "POINCARE_TURNS", 256) if turns is None else turns)
+    delta = float(getattr(cfg, "POINCARE_DELTA", 0.0) if delta is None else delta)
+    pool_size = getattr(cfg, "FMA_POOL_SIZE", None)
+
+    ring, orbit, native = _physical_tracking_ring(context)
+    initial = np.repeat(orbit.reshape(1, 6), len(values), axis=0)
+    initial[:, 4] += delta
+    q_index = 0 if plane == "x" else 2
+    p_index = 1 if plane == "x" else 3
+    initial[:, q_index] += values
+
+    trajectories, tracking_meta = _track_initial_conditions(
+        ring, initial, turns, pool_size=pool_size
+    )
+
+    invariant = STATE.Ix if plane == "x" else STATE.Iy
+    fn = _make_invariant_callable(invariant, context["state"])
+
+    qmax_cfg = float(cfg.PLOT_X_MAX if plane == "x" else cfg.PLOT_Y_MAX)
+    pmax = float(cfg.PLOT_PX_MAX if plane == "x" else cfg.PLOT_PY_MAX)
+    qmax = max(qmax_cfg, 1.10 * float(np.max(np.abs(values))))
+    n = int(getattr(cfg, "POINCARE_GRID_POINTS", cfg.PLOT_GRID_POINTS))
+
+    q = np.linspace(-qmax, qmax, n)
+    p = np.linspace(-pmax, pmax, n)
+    Q, P = np.meshgrid(q, p, indexing="xy")
+
+    delta_abs = orbit[4] + delta
+    if plane == "x":
+        Z = fn(delta_abs, orbit[0] + Q, orbit[2], orbit[1] + P, orbit[3])
+    else:
+        Z = fn(delta_abs, orbit[0], orbit[2] + Q, orbit[1], orbit[3] + P)
+
+    levels = np.asarray(
+        [float(fn(row[4], row[0], row[2], row[1], row[3])) for row in initial],
+        dtype=float,
+    )
+    levels = np.unique(levels)
+    zmin, zmax = float(np.nanmin(Z)), float(np.nanmax(Z))
+    levels = levels[(levels > zmin) & (levels < zmax)]
+    if levels.size == 0:
+        raise ValueError(
+            "Requested initial conditions do not produce contour levels inside the plotting box."
+        )
+
+    plot_path = None
+    if save or show:
+        plt = get_pyplot(show)
+        fig, ax = plt.subplots(figsize=(8.0, 6.5))
+        ax.contour(Q, P, Z, levels=np.sort(levels), linewidths=1.0)
+        for value, trajectory in zip(values, trajectories):
+            q_track = trajectory[q_index] - orbit[q_index]
+            p_track = trajectory[p_index] - orbit[p_index]
+            ax.scatter(q_track, p_track, s=8, alpha=0.65, label=f"{plane}0={value:g}")
+
+        ax.set_xlabel(r"$x-x_c$ [m]" if plane == "x" else r"$y-y_c$ [m]")
+        ax.set_ylabel(r"$p_x-p_{x,c}$" if plane == "x" else r"$p_y-p_{y,c}$")
+        ax.set_title(
+            f"Invariant contours vs. physical Poincare tracking ({plane})\n"
+            f"{native['n_cells']} cells | {turns} turns | delta={delta:g}"
+        )
+        ax.set_xlim(-qmax, qmax)
+        ax.set_ylim(-pmax, pmax)
+        ax.grid(alpha=0.2)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        if save:
+            if file_name is None:
+                out = _resolve(
+                    getattr(cfg, "POINCARE_OUTPUT_DIRECTORY", _output_root() / "poincare")
+                )
+                plot_path = Path(out) / f"invariant_poincare_{plane}.png"
+            else:
+                plot_path = Path(_resolve(file_name))
+            plot_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(plot_path, dpi=240)
+        if show:
+            plt.show()
+        plt.close(fig)
+
+    other_q = 2 if plane == "x" else 0
+    other_p = 3 if plane == "x" else 1
+    max_position_leakage = max(
+        float(np.max(np.abs(t[other_q] - orbit[other_q]))) for t in trajectories
+    )
+    max_momentum_leakage = max(
+        float(np.max(np.abs(t[other_p] - orbit[other_p]))) for t in trajectories
+    )
+    qtol = float(getattr(cfg, "POINCARE_LEAKAGE_POSITION_TOL", np.inf))
+    ptol = float(getattr(cfg, "POINCARE_LEAKAGE_MOMENTUM_TOL", np.inf))
+
+    return {
+        "plane": plane,
+        "values": values,
+        "levels": levels,
+        "trajectories": trajectories,
+        "tracking": tracking_meta,
+        "max_other_plane_position": max_position_leakage,
+        "max_other_plane_momentum": max_momentum_leakage,
+        "slice_warning": bool(
+            max_position_leakage > qtol or max_momentum_leakage > ptol
+        ),
+        "plot_path": plot_path,
+        "native": native,
+    }
+
+
+# =============================================================================
+# QUICK A_BOX SELECTION FROM FIXED PHYSICAL TRAJECTORIES
+# =============================================================================
+
+def optimize_a_box(
+    candidates=None,
+    *,
+    x_values=None,
+    turns=None,
+    delta=None,
+    make_active=True,
+):
+    """Choose a_box by Ix conservation on one fixed physical tracking set."""
+    context = _require_context("optimize_a_box()")
+    cfg = _cfg()
+
+    if candidates is None:
+        candidates = getattr(cfg, "A_BOX_CANDIDATES", None)
+    if candidates is None:
+        raise ValueError(
+            "Define A_BOX_CANDIDATES in general_config.py or pass candidates=..."
+        )
+    candidates = [np.asarray(value, dtype=float) for value in candidates]
+    if not candidates:
+        raise ValueError("A_BOX_CANDIDATES cannot be empty.")
+
+    expected = len(context["settings"]["variables"])
+    for candidate in candidates:
+        if candidate.shape != (expected,):
+            raise ValueError(f"Every a_box candidate must have shape ({expected},).")
+        if not np.all(np.isfinite(candidate)) or np.any(candidate <= 0.0):
+            raise ValueError("Every a_box value must be positive and finite.")
+
+    if x_values is None:
+        x_values = getattr(
+            cfg,
+            "A_BOX_TRACKING_X_VALUES",
+            getattr(cfg, "POINCARE_X_VALUES", ()),
+        )
+    x_values = np.asarray(x_values, dtype=float).reshape(-1)
+    if x_values.size == 0:
+        raise ValueError(
+            "A_BOX_TRACKING_X_VALUES must contain at least one x value."
+        )
+
+    turns = int(
+        getattr(cfg, "A_BOX_TRACKING_TURNS", 256) if turns is None else turns
+    )
+    delta = float(
+        getattr(cfg, "A_BOX_TRACKING_DELTA", 0.0) if delta is None else delta
+    )
+    floor_fraction = float(
+        getattr(cfg, "A_BOX_INVARIANCE_FLOOR_FRACTION", 1.0e-8)
+    )
+    pool_size = getattr(cfg, "FMA_POOL_SIZE", None)
+
+    # Track once. These physical trajectories do not depend on a_box.
+    ring, orbit, native = _physical_tracking_ring(context)
+    initial = np.repeat(orbit.reshape(1, 6), len(x_values), axis=0)
+    initial[:, 4] += delta
+    initial[:, 0] += x_values
+    trajectories, tracking_meta = _track_initial_conditions(
+        ring, initial, turns, pool_size=pool_size
+    )
+
+    output_dir = Path(
+        _resolve(getattr(cfg, "A_BOX_OUTPUT_DIRECTORY", _output_root() / "a_box"))
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tracking_path = output_dir / "a_box_fixed_tracking.npz"
+    np.savez_compressed(
+        tracking_path,
+        x_values=x_values,
+        orbit=orbit,
+        delta=np.asarray([delta]),
+        **{f"track_{i:03d}": track for i, track in enumerate(trajectories)},
+    )
+
+    scores = []
+    diagnostics = []
+    tol = float(cfg.LEAST_SQUARES_TOL)
+
+    for candidate in candidates:
+        temporary = opt.context_with_a_box(context, candidate)
+        details = opt.full_diagnostics(
+            temporary,
+            obj.tracked_ix_invariance,
+            tol,
+            compute_ix=True,
+            compute_iy=False,
+            objective_kwargs={"floor_fraction": floor_fraction},
+            extra_data={"trajectories": trajectories},
+        )
+        scores.append(float(details["objective"]))
+        diagnostics.append({
+            key: value
+            for key, value in details.items()
+            if key not in {"Ix", "Iy", "Sx", "Sy", "transfer"}
+        })
+
+    scores_array = np.asarray(scores, dtype=float)
+    finite = np.isfinite(scores_array)
+    if not np.any(finite):
+        raise RuntimeError(
+            "Every a_box candidate produced an invalid invariance score."
+        )
+    finite_indices = np.flatnonzero(finite)
+    best_index = int(finite_indices[np.argmin(scores_array[finite])])
+    best_a_box = candidates[best_index].copy()
+
+    if make_active:
+        opt.set_context_a_box(context, best_a_box)
+        configured_iy = bool(getattr(cfg, "COMPUTE_IY", False))
+        active = opt.compute_requested_invariants(
+            context,
+            tol,
+            compute_ix=True,
+            compute_iy=configured_iy,
+        )
+        active.update({
+            "objective": float(scores_array[best_index]),
+            "objective_name": "tracked_ix_invariance",
+            "selected_a_box": best_a_box.copy(),
+            **diagnostics[best_index],
+        })
+        _set_invariants(active)
+        STATE.source = "a_box_optimized"
+
+    summary = {
+        "best_index": best_index,
+        "best_a_box": best_a_box,
+        "best_score": float(scores_array[best_index]),
+        "candidates": np.asarray(candidates, dtype=float),
+        "scores": scores_array,
+        "diagnostics": diagnostics,
+        "x_values": x_values,
+        "turns": turns,
+        "delta": delta,
+        "tracking": tracking_meta,
+        "tracking_path": tracking_path,
+        "make_active": bool(make_active),
+        "native": native,
+    }
+
+    import json
+    summary_path = output_dir / "a_box_scan.json"
+    payload = {
+        "best_index": best_index,
+        "best_a_box": best_a_box.tolist(),
+        "best_score": float(scores_array[best_index]),
+        "candidates": [c.tolist() for c in candidates],
+        "scores": scores_array.tolist(),
+        "x_values": x_values.tolist(),
+        "turns": turns,
+        "delta": delta,
+        "tracking_path": str(tracking_path),
+    }
+    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    summary["summary_path"] = summary_path
+    return summary
+
 # =============================================================================
 # REPORT WRITERS
 # =============================================================================
@@ -581,53 +1024,97 @@ def write_linear_report(file_name=None):
 
 
 def write_invariant_report(file_name=None):
-    context=_require_invariants("write_invariant_report()")
-    checks=nl.check_nonlinear_state(context["state"])
-    details=STATE.invariant_details or {}
-    file_name=_output_root()/"reports"/"invariant_report.txt" if file_name is None else file_name
-    lines=["="*90,"NONLINEAR INVARIANT REPORT","="*90,"",
-           f"Ix coefficients       : {len(STATE.Ix)}",
-           f"Iy coefficients       : {len(STATE.Iy)}",
-           f"Ix finite             : {bool(np.all(np.isfinite(STATE.Ix)))}",
-           f"Iy finite             : {bool(np.all(np.isfinite(STATE.Iy)))}"]
-    for key in ("objective","value_norm","gradient_norm"):
-        if key in details: lines.append(f"{key:<22}: {details[key]}")
-    lines += ["","NONLINEAR STATE CHECKS","-"*90]
-    lines += [f"{k:<30} {v}" for k,v in checks.items()]
-    return _write_text(file_name,"\n".join(lines))
+    context = _require_invariant("write_invariant_report()")
+    checks = nl.check_nonlinear_state(context["state"])
+    details = STATE.invariant_details or {}
+    file_name = (
+        _output_root()/"reports"/"invariant_report.txt"
+        if file_name is None else file_name
+    )
+    lines = ["="*90, "NONLINEAR INVARIANT REPORT", "="*90, ""]
+    if STATE.Ix is not None:
+        lines += [
+            f"Ix coefficients       : {len(STATE.Ix)}",
+            f"Ix finite             : {bool(np.all(np.isfinite(STATE.Ix)))}",
+        ]
+    else:
+        lines.append("Ix                    : not computed")
+    if STATE.Iy is not None:
+        lines += [
+            f"Iy coefficients       : {len(STATE.Iy)}",
+            f"Iy finite             : {bool(np.all(np.isfinite(STATE.Iy)))}",
+        ]
+    else:
+        lines.append("Iy                    : not computed")
 
+    for key, value in details.items():
+        if key in {"Ix", "Iy", "Sx", "Sy", "transfer"}:
+            continue
+        if np.isscalar(value) or isinstance(value, str):
+            lines.append(f"{key:<22}: {value}")
+    lines += ["", "NONLINEAR STATE CHECKS", "-"*90]
+    lines += [f"{k:<30} {v}" for k, v in checks.items()]
+    return _write_text(file_name, "\n".join(lines))
 
 def _optimization_report_text(result):
-    cfg=_cfg(); lc=STATE.lattice_config
-    sp=result["start_parameters"]; fp=result["final_parameters"]
-    sm=result["start_snapshot"]; fm=result["final_snapshot"]
-    f=lambda x:f"{float(x):.16e}"
-    lines=["="*90,"NONLINEAR OPTIMIZATION REPORT","="*90,"",
-           "OBJECTIVE","-"*90,
-           f"gradient weight = {cfg.GRADIENT_WEIGHT}",
-           f"initial J       = {f(result['start_details']['objective'])}",
-           f"final J         = {f(result['final_details']['objective'])}","",
-           "OPTIMIZED PARAMETERS","-"*90,
-           f"{'parameter':<14}{'initial':>24}{'final':>24}{'change':>24}"]
+    cfg = _cfg(); lc = STATE.lattice_config
+    sp = result["start_parameters"]; fp = result["final_parameters"]
+    sm = result["start_snapshot"]; fm = result["final_snapshot"]
+    f = lambda x: f"{float(x):.16e}"
+    objective_name = result.get(
+        "objective_function",
+        result["final_details"].get("objective_name", "unknown"),
+    )
+    lines = [
+        "="*90, "NONLINEAR OPTIMIZATION REPORT", "="*90, "",
+        "OBJECTIVE", "-"*90,
+        f"function        = {objective_name}",
+        f"initial J       = {f(result['start_details']['objective'])}",
+        f"final J         = {f(result['final_details']['objective'])}",
+    ]
+    if objective_name == "horizontal_invariant_shape":
+        lines.append(f"gradient weight = {cfg.GRADIENT_WEIGHT}")
+    lines += [
+        "", "OPTIMIZED PARAMETERS", "-"*90,
+        f"{'parameter':<14}{'initial':>24}{'final':>24}{'change':>24}",
+    ]
     for name in cfg.VARY:
-        a,b=float(sp[name]),float(fp[name]); lines.append(f"{name:<14}{f(a):>24}{f(b):>24}{f(b-a):>24}")
-    lines += ["","MAGNET CHANGES","-"*90,
-              f"{'parameter':<12}{'magnet':<12}{'field':<10}{'initial':>22}{'final':>22}{'change':>22}"]
-    keys={"LENGTH":"length","ANGLE":"angle","K":"K","S":"S","O":"O"}
+        a, b = float(sp[name]), float(fp[name])
+        lines.append(f"{name:<14}{f(a):>24}{f(b):>24}{f(b-a):>24}")
+    lines += [
+        "", "MAGNET CHANGES", "-"*90,
+        f"{'parameter':<12}{'magnet':<12}{'field':<10}{'initial':>22}{'final':>22}{'change':>22}",
+    ]
+    keys = {"LENGTH":"length", "ANGLE":"angle", "K":"K", "S":"S", "O":"O"}
     for parameter in cfg.VARY:
-        for magnet,field in lc.PARAMETER_MAP.get(parameter,[]):
-            key=keys[field.upper()]; a=sm[magnet][key]; b=fm[magnet][key]
-            lines.append(f"{parameter:<12}{magnet:<12}{field:<10}{f(a):>22}{f(b):>22}{f(b-a):>22}")
-    lines += ["","CHROMATIC CORRECTION","-"*90]
-    for label,corr in (("initial",result["start_correction"]),("final",result["final_correction"])):
-        if corr is None: lines.append(f"{label}: none")
-        else: lines.append(f"{label}: {corr[0]}={f(corr[1])}, {corr[2]}={f(corr[3])}, chrom=({f(corr[4])}, {f(corr[5])})")
-    lines += ["","PLOTS","-"*90]
-    for stage in ("start","end"):
-        diag=result.get(f"fma_{stage}")
-        if diag: lines += [f"{stage} FMA: {diag['frequency_plot_path']}",f"{stage} Ix : {diag['ix_plot_path']}"]
+        for magnet, field in lc.PARAMETER_MAP.get(parameter, []):
+            key = keys[field.upper()]
+            a = sm[magnet][key]; b = fm[magnet][key]
+            lines.append(
+                f"{parameter:<12}{magnet:<12}{field:<10}"
+                f"{f(a):>22}{f(b):>22}{f(b-a):>22}"
+            )
+    lines += ["", "CHROMATIC CORRECTION", "-"*90]
+    for label, corr in (
+        ("initial", result["start_correction"]),
+        ("final", result["final_correction"]),
+    ):
+        if corr is None:
+            lines.append(f"{label}: none")
+        else:
+            lines.append(
+                f"{label}: {corr[0]}={f(corr[1])}, {corr[2]}={f(corr[3])}, "
+                f"chrom=({f(corr[4])}, {f(corr[5])})"
+            )
+    lines += ["", "PLOTS", "-"*90]
+    for stage in ("start", "end"):
+        diag = result.get(f"fma_{stage}")
+        if diag:
+            lines += [
+                f"{stage} FMA: {diag['frequency_plot_path']}",
+                f"{stage} Ix : {diag['ix_plot_path']}",
+            ]
     return "\n".join(lines)
-
 
 def write_optimization_report(file_name=None,result=None):
     result=STATE.optimization_result if result is None else result
@@ -663,79 +1150,157 @@ def write_tracking_report(stage="current",file_name=None):
 
 def write_full_report(file_name=None):
     _require_context("write_full_report()")
-    file_name=_output_root()/"reports"/"full_report.txt" if file_name is None else file_name
-    summary=linear_summary(); checks=linear_checks()
-    lines=["="*90,"FULL ACCELERATOR ANALYSIS REPORT","="*90,"","LINEAR OPTICS","-"*90]
-    lines += [f"{k:<30} {v}" for k,v in summary.items()]
-    lines += ["","LINEAR CHECKS","-"*90] + [f"{k:<30} {v}" for k,v in checks.items()]
-    if STATE.Ix is not None:
-        lines += ["","NONLINEAR INVARIANTS","-"*90,
-                  f"Ix coefficients: {len(STATE.Ix)}",f"Iy coefficients: {len(STATE.Iy)}"]
-        for key in ("objective","value_norm","gradient_norm"):
-            if STATE.invariant_details and key in STATE.invariant_details:
-                lines.append(f"{key}: {STATE.invariant_details[key]}")
-    if STATE.optimization_result is not None:
-        lines += ["",_optimization_report_text(STATE.optimization_result)]
-    for stage,diag in sorted(STATE.diagnostics.items()):
-        fmap=np.asarray(diag["fmap"]); data=np.asarray(diag["ix_data"])
-        valid=(data[:,10]>.5)&np.isfinite(data[:,8])
-        lines += ["",f"TRACKING: {stage}","-"*90,
-                  f"valid FMA points: {len(fmap)} / {len(data)}",
-                  f"valid Ix points : {np.count_nonzero(valid)} / {len(data)}",
-                  f"FMA plot        : {diag['frequency_plot_path']}",
-                  f"Ix plot         : {diag['ix_plot_path']}"]
-    return _write_text(file_name,"\n".join(lines))
+    file_name = (
+        _output_root()/"reports"/"full_report.txt"
+        if file_name is None else file_name
+    )
+    summary = linear_summary(); checks = linear_checks()
+    lines = [
+        "="*90, "FULL ACCELERATOR ANALYSIS REPORT", "="*90, "",
+        "LINEAR OPTICS", "-"*90,
+    ]
+    lines += [f"{k:<30} {v}" for k, v in summary.items()]
+    lines += ["", "LINEAR CHECKS", "-"*90]
+    lines += [f"{k:<30} {v}" for k, v in checks.items()]
 
+    if STATE.Ix is not None or STATE.Iy is not None:
+        lines += ["", "NONLINEAR INVARIANTS", "-"*90]
+        lines.append(
+            f"Ix coefficients: {len(STATE.Ix) if STATE.Ix is not None else 'not computed'}"
+        )
+        lines.append(
+            f"Iy coefficients: {len(STATE.Iy) if STATE.Iy is not None else 'not computed'}"
+        )
+        if STATE.invariant_details:
+            for key, value in STATE.invariant_details.items():
+                if key in {"Ix", "Iy", "Sx", "Sy", "transfer"}:
+                    continue
+                if np.isscalar(value) or isinstance(value, str):
+                    lines.append(f"{key}: {value}")
+
+    if STATE.optimization_result is not None:
+        lines += ["", _optimization_report_text(STATE.optimization_result)]
+
+    for stage, diag in sorted(STATE.diagnostics.items()):
+        if "fmap" not in diag or "ix_data" not in diag:
+            continue
+        fmap = np.asarray(diag["fmap"]); data = np.asarray(diag["ix_data"])
+        valid = (data[:,10] > .5) & np.isfinite(data[:,8])
+        lines += [
+            "", f"TRACKING: {stage}", "-"*90,
+            f"valid FMA points: {len(fmap)} / {len(data)}",
+            f"valid Ix points : {np.count_nonzero(valid)} / {len(data)}",
+            f"FMA plot        : {diag['frequency_plot_path']}",
+            f"Ix plot         : {diag['ix_plot_path']}",
+        ]
+    return _write_text(file_name, "\n".join(lines))
 
 # =============================================================================
 # OPTIMIZATION
 # =============================================================================
 
-def optimize(*,run_start_end_fma=None,quick=False):
-    """Run the configured hybrid optimizer; optimized state stays active."""
-    if STATE.context is None: load()
-    cfg=_cfg()
+def optimize(Fobj, *, run_start_end_fma=None, quick=False):
+    """Run the hybrid optimizer using the supplied objective Python function."""
+    if STATE.context is None:
+        load()
+    cfg = _cfg()
+    if not callable(Fobj):
+        raise TypeError("Fobj must be a callable objective function.")
+    opt.objective_requirements(Fobj)
+
     if importlib.util.find_spec("cma") is None:
-        raise ImportError("optimize() requires cma. Install the project with: python -m pip install -e .")
-    do_fma=bool(cfg.RUN_FMA_START_END) if run_start_end_fma is None else bool(run_start_end_fma)
+        raise ImportError(
+            "optimize() requires cma. Install the project with: python -m pip install -e ."
+        )
+
+    do_fma = (
+        bool(cfg.RUN_FMA_START_END)
+        if run_start_end_fma is None else bool(run_start_end_fma)
+    )
     if do_fma and importlib.util.find_spec("at") is None:
-        raise ImportError('Tracking is enabled. Install with: python -m pip install -e ".[tracking]" or use optimize(run_start_end_fma=False).')
+        raise ImportError(
+            'Tracking is enabled. Install with: python -m pip install -e ".[tracking]" '
+            'or use optimize(..., run_start_end_fma=False).'
+        )
 
-    context=STATE.context; v0=opt.initial_vector(cfg.VARY,context["parameters"])
-    start=opt.full_diagnostics(context,cfg.GRADIENT_WEIGHT,cfg.LEAST_SQUARES_TOL)
+    compute_ix = bool(getattr(cfg, "COMPUTE_IX", True))
+    compute_iy = bool(getattr(cfg, "COMPUTE_IY", False))
+    if do_fma and not compute_ix:
+        raise ValueError(
+            "RUN_FMA_START_END requires COMPUTE_IX=True because run_fma() includes Ix tracking."
+        )
+
+    objective_kwargs = {}
+    if getattr(Fobj, "__name__", "") == "horizontal_invariant_shape":
+        objective_kwargs["gradient_weight"] = float(cfg.GRADIENT_WEIGHT)
+
+    context = STATE.context
+    v0 = opt.initial_vector(cfg.VARY, context["parameters"])
+    start = opt.full_diagnostics(
+        context,
+        Fobj,
+        cfg.LEAST_SQUARES_TOL,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+        objective_kwargs=objective_kwargs,
+    )
     _set_invariants(start)
-    fma_start=run_fma(stage="start",quick=quick) if do_fma else None
+    fma_start = run_fma(stage="start", quick=quick) if do_fma else None
 
-    cma_time=float(cfg.CMA_TIME); pop=cfg.CMA_POPSIZE; pfrac=float(cfg.POWELL_TIME_FRACTION)
+    cma_time = float(cfg.CMA_TIME)
+    pop = cfg.CMA_POPSIZE
+    pfrac = float(cfg.POWELL_TIME_FRACTION)
     if quick:
-        cma_time=min(cma_time,3.0)
-        if pop is not None: pop=min(int(pop),4)
-        pfrac=min(pfrac,.10)
+        cma_time = min(cma_time, 3.0)
+        if pop is not None:
+            pop = min(int(pop), 4)
+        pfrac = min(pfrac, .10)
 
     print("="*80); print("STARTING NONLINEAR OPTIMIZATION"); print("="*80)
-    if quick: print("Mode: QUICK TUTORIAL / SMOKE TEST")
-    plot_settings=_slice_settings()
-    do_slice_plots=bool(cfg.PLOT_START_END_SLICES) and (plot_settings["save"] or plot_settings["show"])
-    result=opt.hybrid_optimize(
-        context,v0,cfg.VARY,gradient_weight=cfg.GRADIENT_WEIGHT,tol=cfg.LEAST_SQUARES_TOL,
-        invalid_penalty=cfg.INVALID_PENALTY,sigma=cfg.CMA_SIGMA,scales=cfg.SCALES,
-        cma_time=cma_time,popsize=pop,print_every=cfg.PRINT_EVERY,
-        powell_time_fraction=pfrac,plot_start_end_slices=do_slice_plots,
-        plot_root=_resolve(cfg.PLOT_ROOT),slice_settings=plot_settings
+    print(f"Objective: {getattr(Fobj, '__name__', Fobj.__class__.__name__)}")
+    if quick:
+        print("Mode: QUICK TUTORIAL / SMOKE TEST")
+
+    plot_settings = _slice_settings()
+    do_slice_plots = bool(cfg.PLOT_START_END_SLICES) and (
+        plot_settings["save"] or plot_settings["show"]
     )
-    STATE.context=result["context"]; _set_invariants(result["final_details"])
-    STATE.source="optimized"
-    fma_end=run_fma(stage="end",quick=quick) if do_fma else None
-    result["fma_start"]=fma_start; result["fma_end"]=fma_end
-    STATE.optimization_result=result
+    result = opt.hybrid_optimize(
+        context,
+        v0,
+        cfg.VARY,
+        Fobj=Fobj,
+        compute_ix=compute_ix,
+        compute_iy=compute_iy,
+        objective_kwargs=objective_kwargs,
+        tol=cfg.LEAST_SQUARES_TOL,
+        invalid_penalty=cfg.INVALID_PENALTY,
+        sigma=cfg.CMA_SIGMA,
+        scales=cfg.SCALES,
+        cma_time=cma_time,
+        popsize=pop,
+        print_every=cfg.PRINT_EVERY,
+        powell_time_fraction=pfrac,
+        plot_start_end_slices=do_slice_plots,
+        plot_root=_resolve(cfg.PLOT_ROOT),
+        slice_settings=plot_settings,
+    )
 
-    opt.save_final_lattice(_resolve(cfg.FINAL_LATTICE_FILE),STATE.context)
+    STATE.context = result["context"]
+    _set_invariants(result["final_details"])
+    STATE.source = "optimized"
+    fma_end = run_fma(stage="end", quick=quick) if do_fma else None
+    result["fma_start"] = fma_start
+    result["fma_end"] = fma_end
+    STATE.optimization_result = result
+
+    opt.save_final_lattice(_resolve(cfg.FINAL_LATTICE_FILE), STATE.context)
     write_optimization_report(result=result)
-    if fma_start is not None: write_tracking_report("start")
-    if fma_end is not None: write_tracking_report("end")
+    if fma_start is not None:
+        write_tracking_report("start")
+    if fma_end is not None:
+        write_tracking_report("end")
     return result
-
-
 def save_current_lattice(file_name=None):
     context=_require_context("save_current_lattice()"); cfg=_cfg()
     file_name=cfg.FINAL_LATTICE_FILE if file_name is None else file_name
