@@ -297,14 +297,14 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
     }
 
 
-def load_advisor(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
-    """Build the advisor/paper nonlinear model on FANQO's monomial ordering.
+def load_eigen(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
+    """Build the reference eigenvector nonlinear model on FANQO's monomial ordering.
 
     The exponent dictionaries and monomial basis are exactly the same as in
     load(). The representation differs: there is no a_box coefficient
     normalization, the coordinate scale is (1,1,1,1,1), the Gram matrix is
     built for physical monomials on the unit symmetric box, and M represents
-    {H,f}, matching the advisor convention T=exp(+L M).
+    {H,f}, matching the reference convention T=exp(+L M).
     """
     dim = len(variables)
     a_box = np.asarray(a_box, dtype=float)
@@ -385,7 +385,7 @@ def load_advisor(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
         "M_basis": M_basis,
         "M_octupole_unit": M_octupole_unit,
         "a_box": np.asarray(a_box, dtype=float).copy(),
-        "invariant_construction": "advisor_eigen",
+        "invariant_construction": "eigen",
         "transport_sign": 1.0,
         "coordinate_scale": np.ones(dim, dtype=float),
     })
@@ -440,7 +440,7 @@ def element_transfer(
 
     Sign convention is selected by the nonlinear state:
         a_box:        M(H)f={f,H},  T=exp(-L M)
-        advisor_eigen:M(H)f={H,f},  T=exp(+L M)
+        eigen:M(H)f={H,f},  T=exp(+L M)
 
     For a zero-length octupole, O is already the integrated strength.  The
     integrated transport generator uses the same state-dependent sign and the kick is
@@ -626,7 +626,7 @@ def initialize_nonlinear(data, m, d, hamiltonian, a_box, variables, field_symbol
     return state
 
 
-def initialize_nonlinear_advisor(
+def initialize_nonlinear_eigen(
     data,
     m,
     d,
@@ -636,8 +636,8 @@ def initialize_nonlinear_advisor(
     field_symbols,
     n=2,
 ):
-    """Initialize the advisor eigenvector construction in physical monomials."""
-    state = load_advisor(
+    """Initialize the reference eigenvector construction in physical monomials."""
+    state = load_eigen(
         m, d, hamiltonian, a_box, variables, field_symbols, n=n
     )
     size = len(state["idx_to_vec"])
@@ -677,12 +677,12 @@ def initialize_nonlinear_for_method(
         return initialize_nonlinear(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
-    if method == "advisor_eigen":
-        return initialize_nonlinear_advisor(
+    if method == "eigen":
+        return initialize_nonlinear_eigen(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
     raise ValueError(
-        "invariant_construction must be 'a_box' or 'advisor_eigen'."
+        "invariant_construction must be 'a_box' or 'eigen'."
     )
 
 
@@ -792,8 +792,8 @@ def horizontal_shape_objective(Ix, Sx, state, gradient_weight=0.1):
         math.sqrt(gradient_sq),
     )
 
-def _advisor_eigenvalue_cutoff(minimum_positive):
-    """Reproduce the adaptive eigenvalue window used in the advisor code."""
+def _eigenvalue_cutoff(minimum_positive):
+    """Reproduce the adaptive eigenvalue window used in the reference implementation."""
     value = abs(float(minimum_positive))
     if 0.0 < value < 1.0e-12:
         return 1.0e-10
@@ -804,7 +804,7 @@ def _advisor_eigenvalue_cutoff(minimum_positive):
     return 1.0e-1
 
 
-def advisor_eigen_invariant(
+def eigen_invariant(
     transfer,
     state,
     *,
@@ -813,7 +813,7 @@ def advisor_eigen_invariant(
 ):
     """Construct an invariant by diagonalizing transfer-I.
 
-    This follows the active nlfe selection in the advisor code while using
+    This follows the active nlfe selection in the reference implementation while using
     FANQO's monomial indexing.
     """
     transfer = np.asarray(transfer, dtype=float)
@@ -845,7 +845,7 @@ def advisor_eigen_invariant(
             "Advisor eigen construction found no positive real eigenvalue of T-I."
         )
 
-    cutoff = _advisor_eigenvalue_cutoff(np.min(positive))
+    cutoff = _eigenvalue_cutoff(np.min(positive))
     candidate_indices = [
         k for k, value in enumerate(eigenvalues)
         if abs(float(np.imag(value))) <= float(imag_tol)
@@ -886,10 +886,10 @@ def advisor_eigen_invariant(
     candidates.sort(key=lambda item: (item[0], item[1]))
     selection_residual, eigen_residual, invariant_vector = candidates[0]
     return invariant_vector, {
-        "advisor_selection_residual": float(selection_residual),
-        "advisor_eigenvalue_residual": float(eigen_residual),
-        "advisor_candidate_count": int(len(candidates)),
-        "advisor_eigen_cutoff": float(cutoff),
+        "reference_selection_residual": float(selection_residual),
+        "eigenvalue_residual": float(eigen_residual),
+        "reference_candidate_count": int(len(candidates)),
+        "eigen_cutoff": float(cutoff),
     }
 
 
@@ -952,11 +952,11 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
         cache=cache,
     )
     method = state.get("invariant_construction", "a_box")
-    if method == "advisor_eigen":
-        Ix, x_details = advisor_eigen_invariant(transfer, state, plane="x")
-        Iy, y_details = advisor_eigen_invariant(transfer, state, plane="y")
+    if method == "eigen":
+        Ix, x_details = eigen_invariant(transfer, state, plane="x")
+        Iy, y_details = eigen_invariant(transfer, state, plane="y")
         result = {
-            "method": "advisor_eigen",
+            "method": "eigen",
             "Ix_details": x_details,
             "Iy_details": y_details,
         }
