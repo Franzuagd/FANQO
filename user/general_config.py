@@ -58,20 +58,26 @@ A_BOX = np.array( #     [delta, x, y, px, py]
     dtype=float,
 )
 
-# 8. NONLINEAR NUMERICAL SETTINGS
+# 8. INVARIANTS TO COMPUTE / KEEP ACTIVE
+# Computing only the invariant planes that are actually needed avoids an
+# unnecessary second least-squares solve during Ix-only work.
+COMPUTE_IX = True
+COMPUTE_IY = False
+
+# 9. NONLINEAR NUMERICAL SETTINGS
 LEAST_SQUARES_TOL = 1.0e-14
 THIN_MULTIPOLE_LENGTH = 1.0e-8
 CACHE_REPEATED_MAGNET_MAPS = True
 CHECK_ELEMENT_UPPER_RIGHT = False
 
-# 9. OBJECTIVE
+# 10. OBJECTIVE
 GRADIENT_WEIGHT = 0.10    #how much influence is the derivate part gonna have
 INVALID_PENALTY = 1.0e30    #???????????????????
 
-# 10. CHROMATIC CORRECTION
+# 11. CHROMATIC CORRECTION
 CORRECT_CHROMATICITY = True   #Do you want it to be corrected? ofc you do, but just in case you got the choice.
 
-# 11. OPTIMIZER SETTINGS
+# 12. OPTIMIZER SETTINGS
 CMA_SIGMA = 0.50  #IDK check google
 CMA_POPSIZE = 3#2   #
 PRINT_EVERY = 1#0
@@ -79,7 +85,7 @@ SCALES = {name: 100.0 for name in VARY}
 CMA_TIME = 60.0
 POWELL_TIME_FRACTION = 0.25
 
-# 12. NONLINEAR / START-END PLOT SETTINGS
+# 13. NONLINEAR / START-END PLOT SETTINGS
 SAVE_PLOTS = True
 SHOW_PLOTS = False
 
@@ -103,7 +109,7 @@ SLICE_X_VALUES = (0.0,) #Amount of Iy slices to plot: (list of values of x)
 SLICE_DELTA_VALUES = (0.0, 0.5 * float(A_BOX[0]), float(A_BOX[0])) #  Different values of delta for the slices: (list of values of delta)
 SLICE_FROZEN_MOMENTUM = 0.0 #IDK what this is for?
 
-# 13. FREQUENCY MAP ANALYSIS + IX TRACKING
+# 14. FREQUENCY MAP ANALYSIS + IX TRACKING
 RUN_FMA_START_END = True
 
 FMA_CASE_LABEL = "current_lattice"
@@ -144,7 +150,41 @@ IX_INVARIANCE_NORM_FLOOR_FRACTION = 1.0e-12
 IX_INVARIANCE_LOG_MIN = -14.0
 IX_INVARIANCE_LOG_MAX = 0.0
 
-# 14. OUTPUTS
+# 15. INVARIANT CONTOURS VS. PHYSICAL POINCARE TRACKING
+# Initial coordinate offsets relative to the closed orbit, in metres.
+POINCARE_X_VALUES = [2.0e-3, 4.0e-3, 6.0e-3, 8.0e-3]
+POINCARE_Y_VALUES = []
+
+POINCARE_DELTA = 0.0
+POINCARE_TURNS = 256
+POINCARE_GRID_POINTS = 350
+
+# The contour comparison is a 2-D slice. These tolerances flag trajectories
+# that leak significantly into the other transverse plane.
+POINCARE_LEAKAGE_POSITION_TOL = 1.0e-5
+POINCARE_LEAKAGE_MOMENTUM_TOL = 1.0e-5
+POINCARE_OUTPUT_DIRECTORY = Path("optimization_output") / "poincare"
+
+
+# 16. QUICK A_BOX SELECTION
+# Every candidate follows FANQO variable order [delta, x, y, px, py].
+# Replace these starter values with the discrete boxes you want to compare.
+A_BOX_CANDIDATES = [
+    0.75 * A_BOX,
+    A_BOX.copy(),
+    1.25 * A_BOX,
+]
+
+# These physical particles are tracked once. Every candidate invariant is then
+# evaluated on exactly the same saved trajectories.
+A_BOX_TRACKING_X_VALUES = [2.0e-3, 4.0e-3, 6.0e-3, 8.0e-3]
+A_BOX_TRACKING_TURNS = 256
+A_BOX_TRACKING_DELTA = 0.0
+A_BOX_INVARIANCE_FLOOR_FRACTION = 1.0e-8
+A_BOX_OUTPUT_DIRECTORY = Path("optimization_output") / "a_box"
+
+
+# 17. OUTPUTS
 OUTPUT_ROOT = Path("optimization_output")
 REPORT_FILE = OUTPUT_ROOT / "optimization_report.txt"
 FINAL_LATTICE_FILE = OUTPUT_ROOT / "final_lattice.json"
