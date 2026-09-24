@@ -208,6 +208,7 @@ def rescaled_state_for_a_box(reference_state, data, a_box):
     state["epsilon"] = epsilon
     state["C"] = epsilon * math.sqrt(arg)
     state["a_box"] = np.asarray(a_box, dtype=float).copy()
+    state["coordinate_scale"] = np.asarray(a_box, dtype=float).copy()
     state["linear_cs0"] = cs0.copy()
     state["D_x"] = nl.build_derivative_matrix(state, 1)
     state["D_y"] = nl.build_derivative_matrix(state, 2)
