@@ -291,7 +291,99 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
         "nonquad_size": size - quadratic_size(n),
         "monomial_basis": build_monomial_basis(variables, idx_to_vec),
         "a_box": a_box.copy(),
+        "invariant_construction": "a_box",
+        "transport_sign": -1.0,
+        "coordinate_scale": np.asarray(a_box, dtype=float).copy(),
     }
+
+
+def load_advisor(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
+    """Build the advisor/paper nonlinear model on FANQO's monomial ordering.
+
+    The exponent dictionaries and monomial basis are exactly the same as in
+    load(). The representation differs: there is no a_box coefficient
+    normalization, the coordinate scale is (1,1,1,1,1), the Gram matrix is
+    built for physical monomials on the unit symmetric box, and M represents
+    {H,f}, matching the advisor convention T=exp(+L M).
+    """
+    dim = len(variables)
+    base = load(
+        m, d, hamiltonian, np.ones(dim, dtype=float),
+        variables, field_symbols, n=n,
+    )
+
+    idx_to_vec = base["idx_to_vec"]
+    size = len(idx_to_vec)
+
+    G = np.zeros((size, size), dtype=float)
+    for i in range(size):
+        fi = idx_to_vec[i]
+        for j in range(i, size):
+            fj = idx_to_vec[j]
+            value = 1.0
+            for axis in range(dim):
+                power = fi[axis] + fj[axis]
+                if power % 2:
+                    value = 0.0
+                    break
+                value *= 1.0 / (power + 1.0)
+            G[i, j] = value
+            G[j, i] = value
+
+    epsilon = np.ones(size, dtype=float)
+
+    B = [sps.lil_matrix((size, size), dtype=float) for _ in range(size)]
+    for (k, i), pairs in base["bracket_pairs"].items():
+        fi = idx_to_vec[i]
+        for j, plane in pairs:
+            fj = idx_to_vec[j]
+            q_idx = 1 + plane
+            p_idx = 3 + plane
+            sympl = fi[q_idx] * fj[p_idx] - fi[p_idx] * fj[q_idx]
+            if sympl:
+                B[k][i, j] += float(sympl)
+    B = [matrix.tocsr() for matrix in B]
+
+    # B[k][i,j] is the coefficient of {e_i,e_j}; selecting the Hamiltonian
+    # row therefore builds M(H)f={H,f}. There is intentionally no minus sign.
+    M_basis = []
+    for i in base["order"]:
+        Mi = sps.lil_matrix((size, size), dtype=float)
+        for k in range(size):
+            row = B[k].getrow(i)
+            if row.nnz:
+                for j, value in zip(row.indices, row.data):
+                    Mi[k, j] = float(value)
+        M_basis.append(Mi.toarray())
+
+    zero_fields = np.zeros(len(field_symbols), dtype=float)
+    octupole_fields = zero_fields.copy()
+    octupole_fields[3] = 1.0
+    h_zero = np.asarray(
+        base["H_vec_func"](*zero_fields), dtype=float
+    ).reshape(-1)
+    h_oct = (
+        np.asarray(base["H_vec_func"](*octupole_fields), dtype=float).reshape(-1)
+        - h_zero
+    )
+    M_octupole_unit = np.zeros(M_basis[0].shape, dtype=float)
+    for coeff, basis_matrix in zip(h_oct, M_basis):
+        if coeff != 0.0:
+            M_octupole_unit += float(coeff) * basis_matrix
+
+    state = dict(base)
+    state.update({
+        "G": G,
+        "epsilon": epsilon,
+        "B": B,
+        "M_basis": M_basis,
+        "M_octupole_unit": M_octupole_unit,
+        "a_box": np.asarray(a_box, dtype=float).copy(),
+        "invariant_construction": "advisor_eigen",
+        "transport_sign": 1.0,
+        "coordinate_scale": np.ones(dim, dtype=float),
+    })
+    return state
 
 
 def assemble_M(h_vec, M_basis):
@@ -367,7 +459,8 @@ def element_transfer(
         if element_type == "multipole" and O != 0.0:
             # O is already integrated.  Do not divide by, multiply by,
             # or invent a thin-element length.
-            ML = -O * state["M_octupole_unit"]
+            transport_sign = float(state.get("transport_sign", -1.0))
+            ML = transport_sign * O * state["M_octupole_unit"]
             tmatrix = identity + ML
         else:
             tmatrix = identity
@@ -378,7 +471,8 @@ def element_transfer(
             dtype=float,
         ).reshape(-1)
         M = assemble_M(h_vec, M_basis)
-        tmatrix = expm(-L * M)
+        transport_sign = float(state.get("transport_sign", -1.0))
+        tmatrix = expm(transport_sign * L * M)
 
     q = state["quad_size"]
     Mqq = tmatrix[:q, :q]
@@ -520,9 +614,71 @@ def initialize_nonlinear(data, m, d, hamiltonian, a_box, variables, field_symbol
     # Fast coefficient-space derivatives used by the shape/stability objective.
     # Variable order is [delta, x, y, px, py].
     state["D_x"] = build_derivative_matrix(state, 1)
+    state["D_y"] = build_derivative_matrix(state, 2)
     state["D_px"] = build_derivative_matrix(state, 3)
+    state["D_py"] = build_derivative_matrix(state, 4)
 
     return state
+
+
+def initialize_nonlinear_advisor(
+    data,
+    m,
+    d,
+    hamiltonian,
+    a_box,
+    variables,
+    field_symbols,
+    n=2,
+):
+    """Initialize the advisor eigenvector construction in physical monomials."""
+    state = load_advisor(
+        m, d, hamiltonian, a_box, variables, field_symbols, n=n
+    )
+    size = len(state["idx_to_vec"])
+    q = state["quad_size"]
+
+    state = dict(state)
+    # Requested coordinate C=(1,1,1,1,1). Downstream FANQO stores one scale
+    # per monomial, so the compatible coefficient scale is the identity.
+    state["C"] = np.ones(size, dtype=float)
+    state["coordinate_scale"] = np.ones(len(variables), dtype=float)
+    state["Gqq"] = state["G"][:q, :q]
+    state["Gnn"] = state["G"][q:, q:]
+    state["linear_cs0"] = np.asarray(
+        lin.linear_data(data, "CS0"), dtype=float
+    ).copy()
+    state["D_x"] = build_derivative_matrix(state, 1)
+    state["D_y"] = build_derivative_matrix(state, 2)
+    state["D_px"] = build_derivative_matrix(state, 3)
+    state["D_py"] = build_derivative_matrix(state, 4)
+    return state
+
+
+def initialize_nonlinear_for_method(
+    data,
+    m,
+    d,
+    hamiltonian,
+    a_box,
+    variables,
+    field_symbols,
+    n=2,
+    invariant_construction="a_box",
+):
+    """Dispatch to one of FANQO's invariant representations."""
+    method = str(invariant_construction).lower()
+    if method == "a_box":
+        return initialize_nonlinear(
+            data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
+        )
+    if method == "advisor_eigen":
+        return initialize_nonlinear_advisor(
+            data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
+        )
+    raise ValueError(
+        "invariant_construction must be 'a_box' or 'advisor_eigen'."
+    )
 
 
 def quadratic_invariants(data, state):
@@ -627,6 +783,107 @@ def horizontal_shape_objective(Ix, Sx, state, gradient_weight=0.1):
         math.sqrt(value_sq),
         math.sqrt(gradient_sq),
     )
+
+def _advisor_eigenvalue_cutoff(minimum_positive):
+    """Reproduce the adaptive eigenvalue window used in the advisor code."""
+    value = abs(float(minimum_positive))
+    if 0.0 < value < 1.0e-12:
+        return 1.0e-10
+    if value < 1.0e-8:
+        return 1.0e-8
+    if value < 1.0e-4:
+        return 1.0e-4
+    return 1.0e-1
+
+
+def advisor_eigen_invariant(
+    transfer,
+    state,
+    *,
+    plane="x",
+    imag_tol=1.0e-12,
+):
+    """Construct an invariant by diagonalizing transfer-I.
+
+    This follows the active nlfe selection in the advisor code while using
+    FANQO's monomial indexing.
+    """
+    transfer = np.asarray(transfer, dtype=float)
+    size = len(state["idx_to_vec"])
+    if transfer.shape != (size, size):
+        raise ValueError("Transfer shape does not match the polynomial basis.")
+
+    plane = str(plane).lower()
+    vec_to_idx = state["vec_to_idx"]
+    if plane == "x":
+        i_q2 = vec_to_idx[(0, 2, 0, 0, 0)]
+        i_qp = vec_to_idx[(0, 1, 0, 1, 0)]
+        i_p2 = vec_to_idx[(0, 0, 0, 2, 0)]
+    elif plane == "y":
+        i_q2 = vec_to_idx[(0, 0, 2, 0, 0)]
+        i_qp = vec_to_idx[(0, 0, 1, 0, 1)]
+        i_p2 = vec_to_idx[(0, 0, 0, 0, 2)]
+    else:
+        raise ValueError("plane must be 'x' or 'y'.")
+
+    eigenvalues, eigenvectors = np.linalg.eig(
+        transfer - np.eye(size, dtype=float)
+    )
+    real_mask = np.abs(np.imag(eigenvalues)) <= float(imag_tol)
+    real_values = np.real(eigenvalues[real_mask])
+    positive = real_values[real_values > 0.0]
+    if positive.size == 0:
+        raise ValueError(
+            "Advisor eigen construction found no positive real eigenvalue of T-I."
+        )
+
+    cutoff = _advisor_eigenvalue_cutoff(np.min(positive))
+    candidate_indices = [
+        k for k, value in enumerate(eigenvalues)
+        if abs(float(np.imag(value))) <= float(imag_tol)
+        and 0.0 < float(np.real(value)) < cutoff
+    ]
+    if not candidate_indices:
+        raise ValueError(
+            "Advisor eigen construction found no eigenvalue inside its adaptive window."
+        )
+
+    candidates = []
+    for k in candidate_indices:
+        w = np.real(eigenvectors[:, k]).astype(float, copy=True)
+        determinant = w[i_q2] * w[i_p2] - (0.5 * w[i_qp]) ** 2
+        if not np.isfinite(determinant) or determinant <= 0.0:
+            continue
+
+        sign = float(np.sign(w[i_p2]))
+        if sign == 0.0:
+            sign = 1.0
+        w *= sign / math.sqrt(determinant)
+
+        residual = transfer @ w - w
+        selection_residual = abs(float(residual[i_qp]))
+        if not np.isfinite(selection_residual):
+            continue
+        candidates.append((
+            selection_residual,
+            abs(float(np.real(eigenvalues[k]))),
+            w,
+        ))
+
+    if not candidates:
+        raise ValueError(
+            "Advisor eigen construction found no normalizable invariant."
+        )
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    selection_residual, eigen_residual, invariant_vector = candidates[0]
+    return invariant_vector, {
+        "advisor_selection_residual": float(selection_residual),
+        "advisor_eigenvalue_residual": float(eigen_residual),
+        "advisor_candidate_count": int(len(candidates)),
+        "advisor_eigen_cutoff": float(cutoff),
+    }
+
 
 def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
     """Solve the weighted least-squares nonlinear invariant problem."""
