@@ -189,7 +189,10 @@ def status():
         "a_box_mode": (
             str(getattr(cfg, "A_BOX_MODE", "fixed")).lower() if cfg else None
         ),
-        "a_box_calibrated": STATE.a_box_result is not None,
+        "a_box_calibrated": bool(
+            STATE.a_box_result is not None
+            and STATE.a_box_result.get("make_active", False)
+        ),
         "Ix_available": STATE.Ix is not None,
         "Iy_available": STATE.Iy is not None,
         "optimization_completed": STATE.optimization_result is not None,
@@ -1532,7 +1535,11 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
     a_box_mode = str(getattr(cfg, "A_BOX_MODE", "fixed")).lower()
     if a_box_mode not in {"fixed", "auto"}:
         raise ValueError("A_BOX_MODE must be 'fixed' or 'auto'.")
-    if a_box_mode == "auto" and STATE.a_box_result is None:
+    a_box_is_active = bool(
+        STATE.a_box_result is not None
+        and STATE.a_box_result.get("make_active", False)
+    )
+    if a_box_mode == "auto" and not a_box_is_active:
         optimize_a_box(make_active=True)
 
     if importlib.util.find_spec("cma") is None:
