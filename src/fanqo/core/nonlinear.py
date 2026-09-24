@@ -307,6 +307,12 @@ def load_advisor(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
     {H,f}, matching the advisor convention T=exp(+L M).
     """
     dim = len(variables)
+    a_box = np.asarray(a_box, dtype=float)
+    if a_box.shape != (dim,):
+        raise ValueError(f"a_box must have {dim} entries, received {len(a_box)}.")
+    if not np.all(np.isfinite(a_box)) or np.any(a_box <= 0.0):
+        raise ValueError("Every a_box entry must be positive and finite.")
+
     base = load(
         m, d, hamiltonian, np.ones(dim, dtype=float),
         variables, field_symbols, n=n,
@@ -432,13 +438,12 @@ def element_transfer(
 ):
     """Construct the nonlinear polynomial transfer matrix of one element.
 
-    Sign convention:
-        M(H) f = {f, H},
-        dc/ds = -M(H)c,
-        T_thick = exp(-L M(H)).
+    Sign convention is selected by the nonlinear state:
+        a_box:        M(H)f={f,H},  T=exp(-L M)
+        advisor_eigen:M(H)f={H,f},  T=exp(+L M)
 
     For a zero-length octupole, O is already the integrated strength.  The
-    integrated transport generator is ML = -O*M_octupole_unit and the kick is
+    integrated transport generator uses the same state-dependent sign and the kick is
     applied directly as T = I + ML.  No fictitious length enters the map.
 
     Extra keyword arguments are ignored only for compatibility with older
@@ -760,9 +765,12 @@ def horizontal_shape_objective(Ix, Sx, state, gradient_weight=0.1):
     G = state["G"]
     Dx = state["D_x"]
     Dpx = state["D_px"]
-    a_box = np.asarray(state["a_box"], dtype=float)
-    ax = float(a_box[1])
-    apx = float(a_box[3])
+    coordinate_scale = np.asarray(
+        state.get("coordinate_scale", state["a_box"]),
+        dtype=float,
+    )
+    ax = float(coordinate_scale[1])
+    apx = float(coordinate_scale[3])
 
     value_sq = float(N @ G @ N)
 
