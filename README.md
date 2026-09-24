@@ -27,6 +27,7 @@ and edit for their accelerator and run settings.
 │           ├── __init__.py
 │           ├── linear.py
 │           ├── nonlinear.py
+│           ├── objective_functions.py
 │           └── optimization.py
 ├── tests/
 └── user/
@@ -81,6 +82,7 @@ From a directory containing your own `general_config.py` and
 
 ```python
 import fanqo as fq
+from fanqo.core.objective_functions import horizontal_invariant_shape
 
 fq.load("general_config.py")
 fq.status()
@@ -93,7 +95,7 @@ fq.compute_invariants()
 fq.plot_invariant()
 fq.write_invariant_report()
 
-result = fq.optimize()
+result = fq.optimize(horizontal_invariant_shape)
 ```
 
 After `optimize()`, the optimized lattice and final `Ix`/`Iy` are the active
