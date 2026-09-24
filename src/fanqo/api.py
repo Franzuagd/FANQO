@@ -1140,14 +1140,14 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
     objective_name = getattr(Fobj, "__name__", "")
     if objective_name == "horizontal_invariant_shape":
         objective_kwargs["gradient_weight"] = float(cfg.GRADIENT_WEIGHT)
-    elif objective_name == "advisor_fluctuation_index":
+    elif objective_name == "reference_fluctuation_index":
         objective_kwargs.update({
-            "x_range": float(cfg.ADVISOR_OBJECTIVE_X_RANGE),
-            "x_points": int(cfg.ADVISOR_OBJECTIVE_X_POINTS),
-            "y_range": float(cfg.ADVISOR_OBJECTIVE_Y_RANGE),
-            "y_points": int(cfg.ADVISOR_OBJECTIVE_Y_POINTS),
-            "delta_values": tuple(cfg.ADVISOR_OBJECTIVE_DELTA_VALUES),
-            "momentum_weight": float(cfg.ADVISOR_OBJECTIVE_MOMENTUM_WEIGHT),
+            "x_range": float(cfg.REFERENCE_OBJECTIVE_X_RANGE),
+            "x_points": int(cfg.REFERENCE_OBJECTIVE_X_POINTS),
+            "y_range": float(cfg.REFERENCE_OBJECTIVE_Y_RANGE),
+            "y_points": int(cfg.REFERENCE_OBJECTIVE_Y_POINTS),
+            "delta_values": tuple(cfg.REFERENCE_OBJECTIVE_DELTA_VALUES),
+            "momentum_weight": float(cfg.REFERENCE_OBJECTIVE_MOMENTUM_WEIGHT),
         })
 
     context = STATE.context
