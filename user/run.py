@@ -1,6 +1,7 @@
 """End-to-end tutorial for FANQO."""
 from importlib.util import find_spec
 import fanqo as fq
+from fanqo.core.objective_functions import horizontal_invariant_shape
 
 def main():
     fq.load("general_config.py")
@@ -16,7 +17,16 @@ def main():
     invariant_report = fq.write_invariant_report()
 
     tracking_available = find_spec("at") is not None
-    result = fq.optimize(quick=True, run_start_end_fma=tracking_available)
+    # The optimizer now receives the objective explicitly.
+    result = fq.optimize(
+        horizontal_invariant_shape,
+        quick=True,
+        run_start_end_fma=tracking_available,
+    )
+
+    # Optional validation tools:
+    # fq.plot_invariant_tracking("x")
+    # a_box_result = fq.optimize_a_box()
 
     # The optimized machine is now the active in-memory state.
     fq.status()
