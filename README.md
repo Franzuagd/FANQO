@@ -98,8 +98,33 @@ fq.write_invariant_report()
 result = fq.optimize(horizontal_invariant_shape)
 ```
 
-After `optimize()`, the optimized lattice and final `Ix`/`Iy` are the active
-in-memory state.
+After `optimize()`, the optimized lattice and whichever invariant planes are enabled in `general_config.py` are the active in-memory state.
+
+
+## Choosing a_box
+
+The user can keep a fixed normalization box:
+
+```python
+A_BOX_MODE = "fixed"
+A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3])
+```
+
+or ask FANQO to calibrate it once before the main magnet optimization:
+
+```python
+A_BOX_MODE = "auto"
+```
+
+In automatic mode FANQO performs one FMA-like physical tracking grid, keeps the complete survivor trajectories, proposes a seed `a_box` from their phase-space envelope, and runs a short CMA-ES search in `log(a_box)`. Every CMA candidate is scored using the same saved trajectories, so no extra particle tracking is performed. The winning `a_box` is then rebuilt once and remains fixed throughout the full magnet optimization.
+
+The same calibration can be requested manually at any time:
+
+```python
+result = fq.optimize_a_box()
+print(result["best_a_box"])
+print(result["best_score"])
+```
 
 ## FMA and Ix tracking
 
