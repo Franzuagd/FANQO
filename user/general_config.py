@@ -54,7 +54,7 @@ N_PLANES = 2
 
 # How Ix/Iy are constructed:
 # "a_box"        -> FANQO weighted least-squares continuation of Courant-Snyder.
-# "advisor_eigen"-> advisor/paper method: diagonalize T-I and select an invariant.
+# "eigen"-> reference eigenvector method: diagonalize T-I and select an invariant.
 INVARIANT_CONSTRUCTION = "a_box"
 
 # 7. NORMALIZATION / PHYSICAL BOX
@@ -84,14 +84,14 @@ CHECK_ELEMENT_UPPER_RIGHT = False
 # Parameters for horizontal_invariant_shape().
 GRADIENT_WEIGHT = 0.10
 
-# Parameters for advisor_fluctuation_index().
-# These reproduce the active sampling choices in the advisor code.
-ADVISOR_OBJECTIVE_X_RANGE = 2.5e-3
-ADVISOR_OBJECTIVE_X_POINTS = 21
-ADVISOR_OBJECTIVE_Y_RANGE = 0.7e-3
-ADVISOR_OBJECTIVE_Y_POINTS = 11
-ADVISOR_OBJECTIVE_DELTA_VALUES = (-3.4e-2,)
-ADVISOR_OBJECTIVE_MOMENTUM_WEIGHT = 0.7
+# Parameters for reference_fluctuation_index().
+# These reproduce the active sampling choices in the reference implementation.
+REFERENCE_OBJECTIVE_X_RANGE = 2.5e-3
+REFERENCE_OBJECTIVE_X_POINTS = 21
+REFERENCE_OBJECTIVE_Y_RANGE = 0.7e-3
+REFERENCE_OBJECTIVE_Y_POINTS = 11
+REFERENCE_OBJECTIVE_DELTA_VALUES = (-3.4e-2,)
+REFERENCE_OBJECTIVE_MOMENTUM_WEIGHT = 0.7
 
 INVALID_PENALTY = 1.0e30
 
