@@ -842,7 +842,7 @@ def eigen_invariant(
     positive = real_values[real_values > 0.0]
     if positive.size == 0:
         raise ValueError(
-            "Advisor eigen construction found no positive real eigenvalue of T-I."
+            "Eigen construction found no positive real eigenvalue of T-I."
         )
 
     cutoff = _eigenvalue_cutoff(np.min(positive))
@@ -853,7 +853,7 @@ def eigen_invariant(
     ]
     if not candidate_indices:
         raise ValueError(
-            "Advisor eigen construction found no eigenvalue inside its adaptive window."
+            "Eigen construction found no eigenvalue inside its adaptive window."
         )
 
     candidates = []
@@ -880,7 +880,7 @@ def eigen_invariant(
 
     if not candidates:
         raise ValueError(
-            "Advisor eigen construction found no normalizable invariant."
+            "Eigen construction found no normalizable invariant."
         )
 
     candidates.sort(key=lambda item: (item[0], item[1]))
