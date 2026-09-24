@@ -17,16 +17,18 @@ def main():
     invariant_report = fq.write_invariant_report()
 
     tracking_available = find_spec("at") is not None
-    # The optimizer now receives the objective explicitly.
+    # If general_config.py has A_BOX_MODE = "auto", FANQO calibrates a_box
+    # exactly once here before starting the magnet optimization. With
+    # A_BOX_MODE = "fixed", the user-provided A_BOX is used unchanged.
     result = fq.optimize(
         horizontal_invariant_shape,
         quick=True,
         run_start_end_fma=tracking_available,
     )
 
-    # Optional validation tools:
+    # Optional validation/manual calibration tools:
     # fq.plot_invariant_tracking("x")
-    # a_box_result = fq.optimize_a_box()
+    # a_box_result = fq.optimize_a_box()  # can be run manually whenever desired
 
     # The optimized machine is now the active in-memory state.
     fq.status()
