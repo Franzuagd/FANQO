@@ -150,9 +150,9 @@ def validate_general_config(general_cfg):
     if int(general_cfg.ANALYSIS_CELLS)<1:
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
     method = str(general_cfg.INVARIANT_CONSTRUCTION).lower()
-    if method not in {"a_box", "advisor_eigen"}:
+    if method not in {"a_box", "eigen"}:
         raise ValueError(
-            "INVARIANT_CONSTRUCTION must be 'a_box' or 'advisor_eigen'."
+            "INVARIANT_CONSTRUCTION must be 'a_box' or 'eigen'."
         )
     return general_cfg
 def load_general_config(file_name="general_config.py", *, relative_to=None, reload=False):
