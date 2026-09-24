@@ -916,6 +916,7 @@ def _plot_saved_ix_tracking(
     path,
     *,
     title,
+    save=True,
     show=False,
 ):
     """Plot Ix contours against already-saved physical trajectories."""
@@ -953,13 +954,12 @@ def _plot_saved_ix_tracking(
     plt = get_pyplot(show)
     fig, ax = plt.subplots(figsize=(8.0, 6.5))
     ax.contour(Q, P, Z, levels=np.sort(levels), linewidths=1.0)
-    for value, trajectory in zip(x_values, trajectories):
+    for trajectory in trajectories:
         ax.scatter(
             trajectory[0] - orbit[0],
             trajectory[1] - orbit[1],
             s=8,
             alpha=0.65,
-            label=f"x0={value:g}",
         )
     ax.set_xlabel(r"$x-x_c$ [m]")
     ax.set_ylabel(r"$p_x-p_{x,c}$")
@@ -969,15 +969,15 @@ def _plot_saved_ix_tracking(
     ax.set_xlim(-qmax, qmax)
     ax.set_ylim(-pmax, pmax)
     ax.grid(alpha=0.2)
-    ax.legend(fontsize=8)
     fig.tight_layout()
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=240)
+    if save:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=240)
     if show:
         plt.show()
     plt.close(fig)
-    return path
+    return path if save else None
 
 
 def optimize_a_box(
@@ -1183,6 +1183,71 @@ def optimize_a_box(
                     best_diagnostics = dict(diagnostics)
             es.tell(solutions, values)
 
+    save_plot, show_plot = _plot_flags()
+    seed_plot_path = None
+    best_plot_path = None
+    if save_plot or show_plot:
+        # A 2-D Ix contour plot is only directly comparable to trajectories
+        # launched on the horizontal slice nearest y=0. The full 2-D launch
+        # grid is still used for the survivor seed and the objective.
+        y_launch_mm = np.asarray([p[1] for p in launch_pairs], dtype=float)
+        y0_mm = float(ys_mm[np.argmin(np.abs(ys_mm))])
+        plot_indices = np.flatnonzero(np.isclose(y_launch_mm, y0_mm))
+        plot_trajectories = [trajectories[i] for i in plot_indices]
+        plot_initial = initial[plot_indices]
+        x_launch_m = 1.0e-3 * np.asarray(
+            [launch_pairs[i][0] for i in plot_indices],
+            dtype=float,
+        )
+
+        # IMPORTANT: context is still in the original reference basis here.
+        seed_data = opt.a_box_objective_data(
+            context,
+            reference_transfer,
+            seed,
+            survivor_trajectories,
+            tol,
+        )
+        best_data = opt.a_box_objective_data(
+            context,
+            reference_transfer,
+            best_a_box,
+            survivor_trajectories,
+            tol,
+        )
+        seed_plot_target = output_dir / "a_box_seed_poincare.png"
+        best_plot_target = output_dir / "a_box_best_poincare.png"
+        seed_plot_path = _plot_saved_ix_tracking(
+            seed_data["Ix"],
+            seed_data["state"],
+            plot_trajectories,
+            plot_initial,
+            orbit,
+            native,
+            x_launch_m,
+            turns,
+            delta,
+            seed_plot_target,
+            title="Seed a_box: Ix contours vs. fixed tracking",
+            save=save_plot,
+            show=show_plot,
+        )
+        best_plot_path = _plot_saved_ix_tracking(
+            best_data["Ix"],
+            best_data["state"],
+            plot_trajectories,
+            plot_initial,
+            orbit,
+            native,
+            x_launch_m,
+            turns,
+            delta,
+            best_plot_target,
+            title="Optimized a_box: Ix contours vs. fixed tracking",
+            save=save_plot,
+            show=show_plot,
+        )
+
     # Build the winning nonlinear state exactly once for the subsequent main
     # optimization. No future magnet candidate changes a_box.
     if make_active:
@@ -1205,62 +1270,6 @@ def optimize_a_box(
         })
         _set_invariants(active_invariants)
         STATE.source = "a_box_calibrated"
-
-    save_plot, show_plot = _plot_flags()
-    seed_plot_path = None
-    best_plot_path = None
-    if save_plot or show_plot:
-        x_launch_m = 1.0e-3 * np.asarray([p[0] for p in launch_pairs])
-        seed_data = opt.a_box_objective_data(
-            context,
-            reference_transfer,
-            seed,
-            trajectories,
-            tol,
-        )
-        best_data = opt.a_box_objective_data(
-            context,
-            reference_transfer,
-            best_a_box,
-            trajectories,
-            tol,
-        )
-        if save_plot:
-            seed_plot_path = output_dir / "a_box_seed_poincare.png"
-            best_plot_path = output_dir / "a_box_best_poincare.png"
-        else:
-            # The helper requires a path because its normal use is reproducible
-            # research output; temporary paths are kept inside the output folder.
-            seed_plot_path = output_dir / "a_box_seed_poincare.png"
-            best_plot_path = output_dir / "a_box_best_poincare.png"
-        _plot_saved_ix_tracking(
-            seed_data["Ix"],
-            seed_data["state"],
-            trajectories,
-            initial,
-            orbit,
-            native,
-            x_launch_m,
-            turns,
-            delta,
-            seed_plot_path,
-            title="Seed a_box: Ix contours vs. fixed tracking",
-            show=show_plot,
-        )
-        _plot_saved_ix_tracking(
-            best_data["Ix"],
-            best_data["state"],
-            trajectories,
-            initial,
-            orbit,
-            native,
-            x_launch_m,
-            turns,
-            delta,
-            best_plot_path,
-            title="Optimized a_box: Ix contours vs. fixed tracking",
-            show=show_plot,
-        )
 
     summary = {
         "initial_a_box": current_a_box.copy(),
