@@ -925,6 +925,80 @@ def optimize_a_box(
     diagnostics = []
     tol = float(cfg.LEAST_SQUARES_TOL)
 
+    # Build the current Ix once and compare its predicted level sets against the
+    # exact same saved trajectories. No second physical tracking is performed.
+    baseline = opt.compute_requested_invariants(
+        context,
+        tol,
+        compute_ix=True,
+        compute_iy=False,
+    )
+    baseline_ix = baseline["Ix"]
+    baseline_fn = _make_invariant_callable(baseline_ix, context["state"])
+    baseline_plot_path = None
+    save_plot, show_plot = _plot_flags()
+    if save_plot or show_plot:
+        qmax = max(
+            float(cfg.PLOT_X_MAX),
+            1.10 * float(np.max(np.abs(x_values))),
+        )
+        pmax = float(cfg.PLOT_PX_MAX)
+        ngrid = int(getattr(cfg, "POINCARE_GRID_POINTS", cfg.PLOT_GRID_POINTS))
+        q = np.linspace(-qmax, qmax, ngrid)
+        p = np.linspace(-pmax, pmax, ngrid)
+        Q, P = np.meshgrid(q, p, indexing="xy")
+        Z = baseline_fn(
+            orbit[4] + delta,
+            orbit[0] + Q,
+            orbit[2],
+            orbit[1] + P,
+            orbit[3],
+        )
+        levels = np.asarray(
+            [
+                float(
+                    baseline_fn(
+                        row[4], row[0], row[2], row[1], row[3]
+                    )
+                )
+                for row in initial
+            ],
+            dtype=float,
+        )
+        levels = np.unique(levels)
+        zmin, zmax = float(np.nanmin(Z)), float(np.nanmax(Z))
+        levels = levels[(levels > zmin) & (levels < zmax)]
+
+        if levels.size:
+            plt = get_pyplot(show_plot)
+            fig, ax = plt.subplots(figsize=(8.0, 6.5))
+            ax.contour(Q, P, Z, levels=np.sort(levels), linewidths=1.0)
+            for value, trajectory in zip(x_values, trajectories):
+                ax.scatter(
+                    trajectory[0] - orbit[0],
+                    trajectory[1] - orbit[1],
+                    s=8,
+                    alpha=0.65,
+                    label=f"x0={value:g}",
+                )
+            ax.set_xlabel(r"$x-x_c$ [m]")
+            ax.set_ylabel(r"$p_x-p_{x,c}$")
+            ax.set_title(
+                "Baseline Ix contours vs. fixed Poincare tracking\n"
+                f"{native['n_cells']} cells | {turns} turns | delta={delta:g}"
+            )
+            ax.set_xlim(-qmax, qmax)
+            ax.set_ylim(-pmax, pmax)
+            ax.grid(alpha=0.2)
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            if save_plot:
+                baseline_plot_path = output_dir / "a_box_baseline_poincare.png"
+                fig.savefig(baseline_plot_path, dpi=240)
+            if show_plot:
+                plt.show()
+            plt.close(fig)
+
     for candidate in candidates:
         temporary = opt.context_with_a_box(context, candidate)
         details = opt.full_diagnostics(
@@ -983,6 +1057,7 @@ def optimize_a_box(
         "delta": delta,
         "tracking": tracking_meta,
         "tracking_path": tracking_path,
+        "baseline_plot_path": baseline_plot_path,
         "make_active": bool(make_active),
         "native": native,
     }
@@ -999,6 +1074,9 @@ def optimize_a_box(
         "turns": turns,
         "delta": delta,
         "tracking_path": str(tracking_path),
+        "baseline_plot_path": (
+            None if baseline_plot_path is None else str(baseline_plot_path)
+        ),
     }
     summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     summary["summary_path"] = summary_path
