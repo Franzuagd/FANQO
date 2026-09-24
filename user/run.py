@@ -3,7 +3,7 @@ from importlib.util import find_spec
 import fanqo as fq
 from fanqo.core.objective_functions import (
     horizontal_invariant_shape,
-    advisor_fluctuation_index,
+    reference_fluctuation_index,
 )
 
 def main():
@@ -22,10 +22,10 @@ def main():
     tracking_available = find_spec("at") is not None
     # Choose the objective independently from INVARIANT_CONSTRUCTION:
     Fobj = horizontal_invariant_shape
-    # Fobj = advisor_fluctuation_index
+    # Fobj = reference_fluctuation_index
 
     # If INVARIANT_CONSTRUCTION="a_box" and A_BOX_MODE="auto", FANQO
-    # calibrates a_box once before the magnet optimization. advisor_eigen does
+    # calibrates a_box once before the magnet optimization. eigen does
     # not use that calibration.
     result = fq.optimize(
         Fobj,
