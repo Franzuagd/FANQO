@@ -33,6 +33,7 @@ so a failed case can be reproduced easily.
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -337,7 +338,6 @@ def write_runtime_config(
     construction,
     a_box,
     cma_time,
-    fma_enabled=False,
     case_label="case",
 ):
     """Generate a temporary config beside general_config.py.
@@ -438,17 +438,27 @@ def snapshot_runtime_config(output_root):
 
 
 def base_a_box_from_config():
-    # Load once only to read the untouched user configuration value.
-    write_runtime_config(
-        output_root=MASTER_ROOT / "00_bootstrap",
-        construction="a_box",
-        a_box=np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3]),
-        cma_time=60.0,
-        fma_enabled=False,
-        case_label="bootstrap",
+    """Read A_BOX directly from the untouched general_config.py file."""
+    spec = importlib.util.spec_from_file_location(
+        "_fanqo_master_base_config",
+        BASE_CONFIG,
     )
-    fq.load(str(RUNTIME_CONFIG), force=True)
-    return np.asarray(fq.api._cfg().A_BOX, dtype=float).copy()
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot import base config: {BASE_CONFIG}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    box = np.asarray(module.A_BOX, dtype=float).reshape(-1)
+    if box.shape != (5,):
+        raise ValueError(
+            "general_config.py A_BOX must contain five entries "
+            "[delta, x, y, px, py]."
+        )
+    if np.any(~np.isfinite(box)) or np.any(box <= 0.0):
+        raise ValueError(
+            "general_config.py A_BOX entries must be positive and finite."
+        )
+    return box.copy()
 
 
 def run_baseline_fma_and_calibrate(state, initial_a_box):
@@ -753,13 +763,14 @@ def main():
             print(f"Skipping completed case: {case_id}")
             continue
 
-        unfinished = [
-            c for c in cases
+        # Count only cases that can still execute from this point onward.
+        remaining_cases = [
+            c for c in cases[index:]
             if c["id"] not in completed
         ]
         cma_seconds = cma_budget_for_next_case(
             state,
-            len(unfinished),
+            len(remaining_cases),
         )
 
         case_started = time.monotonic()
