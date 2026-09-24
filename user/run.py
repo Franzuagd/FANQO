@@ -1,7 +1,10 @@
 """End-to-end tutorial for FANQO."""
 from importlib.util import find_spec
 import fanqo as fq
-from fanqo.core.objective_functions import horizontal_invariant_shape
+from fanqo.core.objective_functions import (
+    horizontal_invariant_shape,
+    advisor_fluctuation_index,
+)
 
 def main():
     fq.load("general_config.py")
@@ -17,11 +20,15 @@ def main():
     invariant_report = fq.write_invariant_report()
 
     tracking_available = find_spec("at") is not None
-    # If general_config.py has A_BOX_MODE = "auto", FANQO calibrates a_box
-    # exactly once here before starting the magnet optimization. With
-    # A_BOX_MODE = "fixed", the user-provided A_BOX is used unchanged.
+    # Choose the objective independently from INVARIANT_CONSTRUCTION:
+    Fobj = horizontal_invariant_shape
+    # Fobj = advisor_fluctuation_index
+
+    # If INVARIANT_CONSTRUCTION="a_box" and A_BOX_MODE="auto", FANQO
+    # calibrates a_box once before the magnet optimization. advisor_eigen does
+    # not use that calibration.
     result = fq.optimize(
-        horizontal_invariant_shape,
+        Fobj,
         quick=True,
         run_start_end_fma=tracking_available,
     )
