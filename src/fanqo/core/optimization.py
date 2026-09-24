@@ -275,9 +275,9 @@ def a_box_objective_data(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
-    if state.get("invariant_construction", "a_box") == "advisor_eigen":
+    if state.get("invariant_construction", "a_box") == "eigen":
         state["linear_cs0"] = cs0.copy()
-        # C is the identity in advisor mode, so coefficient derivatives do not
+        # C is the identity in eigen mode, so coefficient derivatives do not
         # change when the linear Twiss parameters change.
         return
     bx0, ax0, gx0, _, _, _ = cs0
@@ -479,16 +479,16 @@ def prepare_objective_data(
             result["tnq"] = tnq
         method = state.get("invariant_construction", "a_box")
         if "Ix" in requirements:
-            if method == "advisor_eigen":
+            if method == "eigen":
                 result["Ix"], result["Ix_construction_details"] = (
-                    nl.advisor_eigen_invariant(transfer, state, plane="x")
+                    nl.eigen_invariant(transfer, state, plane="x")
                 )
             else:
                 result["Ix"] = _solve_invariant(Sx, tnn, tnq, state, tol)
         if "Iy" in requirements:
-            if method == "advisor_eigen":
+            if method == "eigen":
                 result["Iy"], result["Iy_construction_details"] = (
-                    nl.advisor_eigen_invariant(transfer, state, plane="y")
+                    nl.eigen_invariant(transfer, state, plane="y")
                 )
             else:
                 result["Iy"] = _solve_invariant(Sy, tnn, tnq, state, tol)
