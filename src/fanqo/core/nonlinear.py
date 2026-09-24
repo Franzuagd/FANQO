@@ -944,14 +944,25 @@ def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
 
 
 def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwargs):
-    """Run transfer construction + least-squares solve using prepared state."""
-    Sx, Sy = quadratic_invariants(data, state)
+    """Construct Ix/Iy using the method stored in the prepared nonlinear state."""
     transfer, tnn, tnq = nonlinear_transfer(
         lattice,
         state,
         tol=tol,
         cache=cache,
     )
+    method = state.get("invariant_construction", "a_box")
+    if method == "advisor_eigen":
+        Ix, x_details = advisor_eigen_invariant(transfer, state, plane="x")
+        Iy, y_details = advisor_eigen_invariant(transfer, state, plane="y")
+        result = {
+            "method": "advisor_eigen",
+            "Ix_details": x_details,
+            "Iy_details": y_details,
+        }
+        return Ix, Iy, result, transfer
+
+    Sx, Sy = quadratic_invariants(data, state)
     result = invariant(tnn, tnq, Sx, Sy, state, tol=tol)
     return result[-2], result[-1], result, transfer
 
