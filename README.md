@@ -222,3 +222,38 @@ This mode saves all requested figures without opening GUI windows and uses a
 non-interactive Matplotlib backend, which is recommended for optimization, FMA,
 remote sessions, and long runs. Set `SHOW_PLOTS = True` when interactive windows
 are desired.
+
+
+## 48-hour validation campaign
+
+The complete objective/construction matrix can be run from the `user` folder:
+
+```bash
+python master_run_48h.py
+```
+
+The campaign uses the same truncated polynomial space (`m=6, d=1`) for both
+invariant constructions and evaluates nine optimization objectives with each
+construction, for 18 optimization cases total. It runs the original-lattice
+FMA once, calibrates `a_box` once, reloads the original lattice before every
+optimization case, and dynamically shares the remaining 48-hour wall-time
+budget among unfinished cases.
+
+Results are written under:
+
+```text
+user/master_48h_output/
+├── 00_baseline/
+├── 01_a_box_calibration/
+├── 02_constructor_baselines/
+├── runs/
+│   ├── a_box/
+│   └── eigen/
+├── campaign_state.json
+└── campaign_summary.csv
+```
+
+The state file is written after every case. Rerunning the master file skips
+completed cases and continues an interrupted campaign. Delete
+`master_48h_output/campaign_state.json` (or the full output folder) to start a
+new 48-hour campaign from scratch.
