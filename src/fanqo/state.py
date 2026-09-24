@@ -11,6 +11,7 @@ class RuntimeState:
     Iy: np.ndarray | None = None
     invariant_details: dict | None = None
     optimization_result: dict | None = None
+    a_box_result: dict | None = None
     diagnostics: dict = field(default_factory=dict)
     source: str = "unloaded"
 STATE = RuntimeState()
