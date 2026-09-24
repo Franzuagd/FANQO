@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fanqo"
-version = "0.2.1"
+version = "0.3.0.dev0"
 description = "Franzua's Accelerator Nonlinear Quasi-Invariant Optimizer: linear optics, nonlinear invariants, optimization, FMA and Ix tracking."
 readme = "README.md"
 requires-python = ">=3.10"
