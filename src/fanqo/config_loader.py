@@ -134,7 +134,7 @@ def analysis_ring_names(general_cfg, lattice_cfg):
 
 _REQUIRED_GENERAL_SETTINGS = (
     "LATTICE_FILE","ANALYSIS_CELLS","VARY","VARIABLES","FIELD_SYMBOLS",
-    "HAMILTONIAN","ORDER","DELTA_ORDER","N_PLANES","A_BOX",
+    "HAMILTONIAN","ORDER","DELTA_ORDER","N_PLANES","INVARIANT_CONSTRUCTION","A_BOX",
     "LEAST_SQUARES_TOL","GRADIENT_WEIGHT","INVALID_PENALTY",
     "CORRECT_CHROMATICITY","CMA_SIGMA","CMA_POPSIZE","PRINT_EVERY",
     "SCALES","CMA_TIME","POWELL_TIME_FRACTION",
@@ -149,6 +149,11 @@ def validate_general_config(general_cfg):
         )
     if int(general_cfg.ANALYSIS_CELLS)<1:
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
+    method = str(general_cfg.INVARIANT_CONSTRUCTION).lower()
+    if method not in {"a_box", "advisor_eigen"}:
+        raise ValueError(
+            "INVARIANT_CONSTRUCTION must be 'a_box' or 'advisor_eigen'."
+        )
     return general_cfg
 def load_general_config(file_name="general_config.py", *, relative_to=None, reload=False):
     cfg=load_python_file(file_name, relative_to=relative_to, module_prefix="general", reload=reload)
