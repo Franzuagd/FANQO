@@ -102,6 +102,38 @@ result = fq.optimize(horizontal_invariant_shape)
 After `optimize()`, the optimized lattice and whichever invariant planes are enabled in `general_config.py` are the active in-memory state.
 
 
+## Invariant construction
+
+FANQO supports two invariant constructors selected in `general_config.py`:
+
+```python
+# Weighted least-squares continuation of the Courant-Snyder invariant.
+INVARIANT_CONSTRUCTION = "a_box"
+
+# Advisor/paper construction: physical monomial coefficients, C=1,
+# M(H)f={H,f}, T=exp(+L M), then diagonalize T-I and select/normalize
+# the near-invariant eigenvector.
+# INVARIANT_CONSTRUCTION = "advisor_eigen"
+```
+
+Both methods preserve the same FANQO monomial indexing and return the same
+public `Ix` vector representation. Therefore objective choice is independent:
+
+```python
+from fanqo.core.objective_functions import (
+    horizontal_invariant_shape,
+    advisor_fluctuation_index,
+)
+
+result = fq.optimize(horizontal_invariant_shape)
+# or:
+# result = fq.optimize(advisor_fluctuation_index)
+```
+
+The four combinations of the two invariant constructors and the two objective
+functions are supported. `A_BOX_MODE="auto"` applies only to the `"a_box"`
+constructor.
+
 ## Choosing a_box
 
 The user can keep a fixed normalization box:
