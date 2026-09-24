@@ -148,6 +148,7 @@ def _build_context(parameters):
         variables=cfg.VARIABLES,
         field_symbols=cfg.FIELD_SYMBOLS,
         n_planes=cfg.N_PLANES,
+        invariant_construction=cfg.INVARIANT_CONSTRUCTION,
     )
 
 
@@ -181,6 +182,9 @@ def status():
         "analysis_cells": int(cfg.ANALYSIS_CELLS) if cfg else None,
         "context_loaded": STATE.context is not None,
         "parameters_state": STATE.source,
+        "invariant_construction": (
+            str(cfg.INVARIANT_CONSTRUCTION).lower() if cfg else None
+        ),
         "active_a_box": (
             np.asarray(STATE.context["settings"].get("a_box"), dtype=float).copy()
             if STATE.context is not None and "a_box" in STATE.context.get("settings", {})
@@ -940,6 +944,7 @@ def _optimization_report_text(result):
         "="*90, "NONLINEAR OPTIMIZATION REPORT", "="*90, "",
         "OBJECTIVE", "-"*90,
         f"function        = {objective_name}",
+        f"invariant method= {str(cfg.INVARIANT_CONSTRUCTION).lower()}",
         f"initial J       = {f(result['start_details']['objective'])}",
         f"final J         = {f(result['final_details']['objective'])}",
     ]
@@ -1094,6 +1099,7 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
         raise TypeError("Fobj must be a callable objective function.")
     opt.objective_requirements(Fobj)
 
+    construction = str(cfg.INVARIANT_CONSTRUCTION).lower()
     a_box_mode = str(getattr(cfg, "A_BOX_MODE", "fixed")).lower()
     if a_box_mode not in {"fixed", "auto"}:
         raise ValueError("A_BOX_MODE must be 'fixed' or 'auto'.")
@@ -1101,7 +1107,11 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
         STATE.a_box_result is not None
         and STATE.a_box_result.get("make_active", False)
     )
-    if a_box_mode == "auto" and not a_box_is_active:
+    if (
+        construction == "a_box"
+        and a_box_mode == "auto"
+        and not a_box_is_active
+    ):
         optimize_a_box(make_active=True)
 
     if importlib.util.find_spec("cma") is None:
@@ -1127,8 +1137,18 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
         )
 
     objective_kwargs = {}
-    if getattr(Fobj, "__name__", "") == "horizontal_invariant_shape":
+    objective_name = getattr(Fobj, "__name__", "")
+    if objective_name == "horizontal_invariant_shape":
         objective_kwargs["gradient_weight"] = float(cfg.GRADIENT_WEIGHT)
+    elif objective_name == "advisor_fluctuation_index":
+        objective_kwargs.update({
+            "x_range": float(cfg.ADVISOR_OBJECTIVE_X_RANGE),
+            "x_points": int(cfg.ADVISOR_OBJECTIVE_X_POINTS),
+            "y_range": float(cfg.ADVISOR_OBJECTIVE_Y_RANGE),
+            "y_points": int(cfg.ADVISOR_OBJECTIVE_Y_POINTS),
+            "delta_values": tuple(cfg.ADVISOR_OBJECTIVE_DELTA_VALUES),
+            "momentum_weight": float(cfg.ADVISOR_OBJECTIVE_MOMENTUM_WEIGHT),
+        })
 
     context = STATE.context
     v0 = opt.initial_vector(cfg.VARY, context["parameters"])
