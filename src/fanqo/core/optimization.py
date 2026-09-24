@@ -161,6 +161,106 @@ def set_context_a_box(context, a_box):
     return context
 
 
+def _epsilon_for_a_box(state, a_box):
+    """Recompute diagonal monomial scaling for the same truncated basis."""
+    a_box = np.asarray(a_box, dtype=float)
+    dim = len(state["idx_to_vec"][0])
+    if a_box.shape != (dim,):
+        raise ValueError(f"a_box must have shape ({dim},).")
+    if not np.all(np.isfinite(a_box)) or np.any(a_box <= 0.0):
+        raise ValueError("Every a_box half-width must be positive and finite.")
+
+    epsilon = np.zeros(len(state["idx_to_vec"]), dtype=float)
+    for i, powers in state["idx_to_vec"].items():
+        value = 1.0
+        for axis, power in enumerate(powers):
+            value *= np.sqrt((2 * power + 1) / (a_box[axis] ** (2 * power)))
+        epsilon[i] = value
+    return epsilon
+
+
+def rescaled_state_for_a_box(reference_state, data, a_box):
+    """Build the a_box-dependent normalization without rebuilding the Lie basis."""
+    state = dict(reference_state)
+    epsilon = _epsilon_for_a_box(reference_state, a_box)
+    cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
+    bx0, ax0, gx0, _, _, _ = cs0
+    vec_to_idx = reference_state["vec_to_idx"]
+
+    ix2 = vec_to_idx[(0, 2, 0, 0, 0)]
+    ixpx = vec_to_idx[(0, 1, 0, 1, 0)]
+    ipx2 = vec_to_idx[(0, 0, 0, 2, 0)]
+    arg = (
+        bx0 * gx0 / (epsilon[ipx2] * epsilon[ix2])
+        - ax0**2 / epsilon[ixpx]**2
+    )
+    if arg <= 0.0:
+        raise ValueError("Nonlinear normalization is not positive for this a_box.")
+
+    state["epsilon"] = epsilon
+    state["C"] = epsilon * math.sqrt(arg)
+    state["a_box"] = np.asarray(a_box, dtype=float).copy()
+    state["linear_cs0"] = cs0.copy()
+    state["D_x"] = nl.build_derivative_matrix(state, 1)
+    state["D_px"] = nl.build_derivative_matrix(state, 3)
+    return state
+
+
+def rescale_transfer_for_a_box(transfer, reference_state, candidate_state):
+    """Change transfer representation under a diagonal monomial rescaling.
+
+    The truncated physical monomial space is unchanged. If D_old and D_new are
+    the diagonal epsilon scalings, then
+
+        T_new = D_new^{-1} D_old T_old D_old^{-1} D_new.
+
+    This avoids rebuilding every element Lie map during the short a_box search.
+    """
+    transfer = np.asarray(transfer, dtype=float)
+    old_eps = np.asarray(reference_state["epsilon"], dtype=float)
+    new_eps = np.asarray(candidate_state["epsilon"], dtype=float)
+    if transfer.shape != (len(old_eps), len(old_eps)):
+        raise ValueError("Transfer shape does not match nonlinear basis size.")
+
+    ratio = old_eps / new_eps
+    return ratio[:, None] * transfer / ratio[None, :]
+
+
+def a_box_objective_data(
+    context,
+    reference_transfer,
+    a_box,
+    trajectories,
+    tol,
+):
+    """Construct Ix for one a_box from a fixed reference transfer."""
+    candidate_state = rescaled_state_for_a_box(
+        context["state"],
+        context["data"],
+        a_box,
+    )
+    transfer = rescale_transfer_for_a_box(
+        reference_transfer,
+        context["state"],
+        candidate_state,
+    )
+    q = candidate_state["quad_size"]
+    tnn = transfer[q:, q:]
+    tnq = transfer[q:, :q]
+    Sx, _ = nl.quadratic_invariants(context["data"], candidate_state)
+    Ix = _solve_invariant(Sx, tnn, tnq, candidate_state, tol)
+    return {
+        "Ix": Ix,
+        "Sx": Sx,
+        "state": candidate_state,
+        "context": context,
+        "transfer": transfer,
+        "tnn": tnn,
+        "tnq": tnq,
+        "trajectories": trajectories,
+    }
+
+
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
