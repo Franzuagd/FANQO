@@ -4,6 +4,15 @@ The optimization engine is objective-agnostic. Each objective receives a
 precomputed data dictionary and declares its required quantities through a
 ``requires`` attribute.
 
+How to read this file
+---------------------
+Objectives are grouped by the physical idea they test:
+
+* shape / fluctuation: coefficient or derivative behavior;
+* integral / mesh: distributed deformation over a horizontal phase-space box;
+* contour / barrier: geometry of the largest origin-connected usable contour;
+* flux / escape / ultimate: actual one-turn defect (T-I)c near that contour.
+
 The objectives adapted from the 2-D synthetic experiment are evaluated on a
 family of horizontal slices
 
@@ -30,7 +39,12 @@ from . import nonlinear as nl
 
 
 def horizontal_invariant_shape(data, *, gradient_weight=0.10):
-    """Current FANQO horizontal quasi-invariant objective."""
+    """Penalize nonlinear departure from the horizontal CS invariant.
+
+    If N = Ix-Sx, this combines the G-norm of N with scaled horizontal
+    derivative norms. It is a global coefficient-space metric rather than a
+    sampled contour metric.
+    """
     objective, value_norm, gradient_norm = nl.horizontal_shape_objective(
         data["Ix"],
         data["Sx"],
@@ -56,7 +70,17 @@ def reference_fluctuation_index(
     delta_values=(-3.4e-2,),
     momentum_weight=0.7,
 ):
-    """Legacy fluctuation-index objective, independent of Ix construction."""
+    """Reference fluctuation objective based on sampled derivatives.
+
+    On the x-y grid with px=py=0, form
+
+        g = Ix_x^2 + Ix_y^2 + (w Ix_px)^2 + (w Ix_py)^2
+
+    after removing the pure delta=0 quadratic sector. Each delta slice is scored
+    with mean, standard deviation, and skewness of g; the worst slice is used.
+
+    It only requires Ix, so it works with either invariant construction.
+    """
     Ix = np.asarray(data["Ix"], dtype=float).reshape(-1)
     state = data["state"]
     size = len(state["idx_to_vec"])
@@ -251,7 +275,12 @@ def _pad_quadratic_reference(Ix, Sx, state):
 
 
 def _slice_polynomial_coefficients(vector, state, *, y, delta, py):
-    """Freeze (delta,y,py) and collapse a FANQO vector to c[i,j] x^i px^j."""
+    """Freeze (delta,y,py) and collapse the full polynomial to (x,px).
+
+    Coupling terms are preserved through substitution. For example x^2*y^2
+    becomes y_fixed^2*x^2 rather than being discarded. This helper is the bridge
+    from FANQO's 5-D invariant to the 2-D geometry used by contour objectives.
+    """
     vector = np.asarray(vector, dtype=float).reshape(-1)
     C = np.asarray(state["C"], dtype=float).reshape(-1)
     if vector.size != C.size:
@@ -386,7 +415,12 @@ def integral_objective(
     weight_mode="custom",
     weight_strength=2.0,
 ):
-    """Weighted deformation objective over multiple horizontal FANQO slices."""
+    """Measure nonlinear deformation over several horizontal slices.
+
+    For h = Ix-Sx on each fixed (y,delta,py) slice, combine a weighted RMS of h
+    with a weighted derivative along the outward Courant-Snyder direction.
+    Slice scores are aggregated conservatively (worst by default).
+    """
     Ix, Sx, state = data["Ix"], data["Sx"], data["state"]
     ys, deltas = _slice_values(state, y_values, delta_values)
     x_max, px_max = _horizontal_limits(state, x_max, px_max)
@@ -496,7 +530,12 @@ def mesh_objective(
     stability_weight_floor=0.02,
     penalty_power=1.0,
 ):
-    """Penalize positive outward growth of h^2 on multiple horizontal slices."""
+    """Penalize only outward growth of nonlinear deformation.
+
+    The local quantity is d(h^2)/dS = grad(h^2).grad(S)/||grad(S)||^2.
+    Negative values mean deformation decreases outward and are ignored; positive
+    values are penalized, with configurable emphasis toward the outer region.
+    """
     Ix, Sx, state = data["Ix"], data["Sx"], data["state"]
     ys, deltas = _slice_values(state, y_values, delta_values)
     x_max, px_max = _horizontal_limits(state, x_max, px_max)
@@ -864,7 +903,13 @@ def contour_objective(
     fold_worst_weight=0.80,
     invalid_weight=5.00,
 ):
-    """Largest origin-connected monotone contour on each y/delta slice."""
+    """Score the largest monotone contour connected to the origin.
+
+    Courant-Snyder normalized rays are followed outward only along their first
+    monotone branch. Detached outer islands therefore cannot masquerade as a
+    large stable region. Radius, distortion, roughness, and folding are scored
+    on each y/delta slice.
+    """
     Ix, state = data["Ix"], data["state"]
     ys, deltas = _slice_values(
         state, y_values, delta_values
@@ -942,7 +987,12 @@ def barrier_objective(
     min_radial_slope=0.02,
     invalid_cost=1e6,
 ):
-    """Maximize the safe origin-connected horizontal phase-space area."""
+    """Maximize origin-connected safe phase-space area.
+
+    For a valid polar contour r(theta),
+        A_safe = 1/2 integral r(theta)^2 dtheta.
+    The minimized score is A_ref/A_safe, aggregated across y/delta slices.
+    """
     Ix, state = data["Ix"], data["state"]
     ys, deltas = _slice_values(
         state, y_values, delta_values
@@ -1097,6 +1147,8 @@ def _transport_slice_components(
     invariant = np.asarray(
         Ix, dtype=float
     )
+    # A true one-turn invariant satisfies T c = c. This is the actual
+    # coefficient vector of the polynomial quasi-invariance defect.
     defect_vector = (
         transfer @ invariant - invariant
     )
@@ -1153,6 +1205,8 @@ def _transport_slice_components(
     grad_norm = np.sqrt(
         dI_dx**2 + dI_dpx**2
     )
+    # First-order geometry: a level-value error Delta I corresponds to an
+    # approximate normal displacement Delta I/|grad I|.
     delta_perp = np.abs(defect) / (
         grad_norm + float(transport_eps)
     )
@@ -1296,21 +1350,21 @@ def _transport_objective(
 
 
 def flux_objective(data, **kwargs):
-    """Worst-slice CVaR of normal one-turn transport."""
+    """Minimize worst-tail normal one-turn transport near the safe contour."""
     return _transport_objective(
         data, "flux", **kwargs
     )
 
 
 def escape_objective(data, **kwargs):
-    """Worst-slice transport divided by the weakest safe radius."""
+    """Penalize normal transport relative to the weakest safe radius."""
     return _transport_objective(
         data, "escape", **kwargs
     )
 
 
 def ultimate_objective(data, **kwargs):
-    """Worst-slice escape cost additionally penalized by small safe area."""
+    """Combine normal transport, weakest radius, and total safe contour area."""
     return _transport_objective(
         data, "ultimate", **kwargs
     )
