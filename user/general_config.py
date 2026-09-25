@@ -1,7 +1,15 @@
-"""General user-editable settings for nonlinear analysis and optimization.
+"""User-editable experiment configuration for FANQO.
 
-Choose the lattice Python file below.  The lattice file may have any filename;
-its path is resolved relative to this general_config.py file.
+Use this file for choices that belong to an experiment rather than to the
+accelerator definition itself: polynomial truncation, invariant construction,
+normalization, objective settings, optimizer budget, plotting, FMA, and output
+locations.
+
+The actual machine (magnets, cell order, parameter dependencies, chromatic
+families) belongs in lattice_config.py.
+
+Coordinate convention used by the nonlinear polynomial code:
+    [delta, x, y, px, py]
 """
 from pathlib import Path
 import numpy as np
@@ -19,7 +27,10 @@ LATTICE_FILE = "lattice_config.py"
 ANALYSIS_CELLS = 1
 
 # 2. VARIABLES TO OPTIMIZE
-VARY = [     #magnets to edit names.
+# These are parameter names from lattice_config.PARAMETERS. CMA/Powell changes
+# only these entries; chromatic correction may additionally update its two
+# dependent correction-family strengths.
+VARY = [
     "kse1", "kfd2", "kfd3", "ks1", "ks2", "ksd3",
     "ks1s", "ks2s", "ko1", "ko2", "ko3",
 ]
@@ -31,7 +42,11 @@ delta, x, y, px, py = sp.symbols("delta x y px py")
 VARIABLES = [delta, x, y, px, py]
 
 # 4. SYMBOLIC ELEMENT / HAMILTONIAN COEFFICIENTS
-#     b1 = curvature; b2 = quadrupole strength K; b3 = sextupole strength S; b4 = nonlinear multipole strength O; b5 = reserved fifth coefficient (currently 0 for every lattice element)
+# b1 = curvature
+# b2 = quadrupole strength K
+# b3 = sextupole strength S
+# b4 = nonlinear multipole strength O
+# b5 = reserved fifth coefficient (currently zero for every element)
 b1, b2, b3, b4, b5 = sp.symbols("b1 b2 b3 b4 b5")
 FIELD_SYMBOLS = [b1, b2, b3, b4, b5]
 
@@ -52,9 +67,10 @@ ORDER = 8
 DELTA_ORDER = 1
 N_PLANES = 2
 
-# How Ix/Iy are constructed:
-# "a_box"        -> FANQO weighted least-squares continuation of Courant-Snyder.
-# "eigen"-> reference eigenvector method: diagonalize T-I and select an invariant.
+# How Ix/Iy are constructed. Objective choice is independent of this setting:
+# "a_box" -> fix the Courant-Snyder quadratic block and solve the nonlinear
+#            continuation by weighted least squares.
+# "eigen" -> diagonalize T-I and select/normalize a near-fixed eigenvector.
 INVARIANT_CONSTRUCTION = "a_box"
 
 # 7. NORMALIZATION / PHYSICAL BOX
@@ -63,7 +79,8 @@ INVARIANT_CONSTRUCTION = "a_box"
 # A_BOX_MODE is used only when INVARIANT_CONSTRUCTION = "a_box".
 A_BOX_MODE = "fixed"
 
-A_BOX = np.array( #     [delta, x, y, px, py]
+# Physical half-widths in nonlinear variable order [delta, x, y, px, py].
+A_BOX = np.array(
     [0.01, 10e-3, 8.0e-3, 1.0e-3, 0.8e-3],
     dtype=float,
 )
@@ -75,9 +92,18 @@ COMPUTE_IX = True
 COMPUTE_IY = False
 
 # 9. NONLINEAR NUMERICAL SETTINGS
+# rcond used by the weighted least-squares invariant solve.
 LEAST_SQUARES_TOL = 1.0e-14
+
+# Kept for compatibility with older experiment files. Current zero-length
+# multipoles use O directly as an integrated kick and do not invent a length.
 THIN_MULTIPOLE_LENGTH = 1.0e-8
+
+# Reuse nonlinear maps of physically identical/unchanged magnets.
 CACHE_REPEATED_MAGNET_MAPS = True
+
+# Optional structural check that the quadratic<-nonlinear transfer block is
+# negligible. Normally false because checking it for every element is costly.
 CHECK_ELEMENT_UPPER_RIGHT = False
 
 # 10. OBJECTIVE
@@ -96,13 +122,26 @@ REFERENCE_OBJECTIVE_MOMENTUM_WEIGHT = 0.7
 INVALID_PENALTY = 1.0e30
 
 # 11. CHROMATIC CORRECTION
-CORRECT_CHROMATICITY = True   #Do you want it to be corrected? ofc you do, but just in case you got the choice.
+# When True, the two families named in lattice_config.py are solved to the
+# requested target chromaticities before nonlinear invariants/objectives.
+CORRECT_CHROMATICITY = True
 
 # 12. OPTIMIZER SETTINGS
-CMA_SIGMA = 0.50  #IDK check google
-CMA_POPSIZE = 3#2   #
-PRINT_EVERY = 1#0
+# CMA_SIGMA is the initial step size in normalized optimizer coordinates.
+CMA_SIGMA = 0.50
+
+# Population size per CMA generation. Small values are useful for debugging;
+# increase only after timing one objective evaluation.
+CMA_POPSIZE = 3
+
+# Print every N objective evaluations/generations as used by the optimizer.
+PRINT_EVERY = 1
+
+# If a varied parameter starts at zero, |v0| cannot define its CMA scale.
+# SCALES provides the fallback physical scale for those zero-valued variables.
 SCALES = {name: 100.0 for name in VARY}
+
+# CMA wall-clock budget in seconds. Powell receives the fraction below.
 CMA_TIME = 60.0
 POWELL_TIME_FRACTION = 0.25
 
@@ -124,11 +163,22 @@ PLOT_PX_MAX = 1.0e-3
 PLOT_Y_MAX = 3.0e-3
 PLOT_PY_MAX = 1.0e-3
 
-PLOT_START_END_SLICES = True   #Do you want it to be plot at the beggining and at the end?
-SLICE_Y_VALUES = (0.0, 0.1 * PLOT_Y_MAX, 0.2*PLOT_Y_MAX)  #Amount of Ix slices to plot: (list of values of y)
-SLICE_X_VALUES = (0.0,) #Amount of Iy slices to plot: (list of values of x)
-SLICE_DELTA_VALUES = (0.0, 0.5 * float(A_BOX[0]), float(A_BOX[0])) #  Different values of delta for the slices: (list of values of delta)
-SLICE_FROZEN_MOMENTUM = 0.0 #IDK what this is for?
+# Plot invariant slices at optimization start/end.
+PLOT_START_END_SLICES = True
+
+# Ix is plotted in (x,px) while y is frozen at each value below.
+SLICE_Y_VALUES = (0.0, 0.1 * PLOT_Y_MAX, 0.2 * PLOT_Y_MAX)
+
+# Iy is plotted in (y,py) while x is frozen at each value below.
+SLICE_X_VALUES = (0.0,)
+
+# Repeat the slices at these momentum offsets delta.
+SLICE_DELTA_VALUES = (0.0, 0.5 * float(A_BOX[0]), float(A_BOX[0]))
+
+# Momentum conjugate to the frozen transverse coordinate:
+#   Ix (x,px) slice -> py = SLICE_FROZEN_MOMENTUM
+#   Iy (y,py) slice -> px = SLICE_FROZEN_MOMENTUM
+SLICE_FROZEN_MOMENTUM = 0.0
 
 # 14. FREQUENCY MAP ANALYSIS + IX TRACKING
 RUN_FMA_START_END = True
