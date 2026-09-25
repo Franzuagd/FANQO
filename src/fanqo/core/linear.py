@@ -1,23 +1,34 @@
-"""General linear-optics tools.
+"""Linear accelerator model used by FANQO.
 
-Magnet representation used internally:
-    [name, type, length, angle, K, S, O, M, M5]
+This module owns everything that should be settled before constructing the
+nonlinear polynomial map: element linear matrices, periodic Twiss/dispersion,
+tunes, chromaticity, chromatic correction, and dependency-aware lattice updates.
+
+Compact magnet representation:
+    [name, type, length, angle, K, S, O, M4, M5]
 
 Linear-data representation returned by linear_optics():
     [cs0, disp0, M4, M5, tune_x, tune_y, chrom_x, chrom_y,
      emittance, circumference, s_values, cs_values, disp_values]
+
+The optimizer relies on update_linear() to avoid repeating expensive work:
+nonlinear-only edits do not force a Twiss solve, while geometry/quadrupole edits
+do. If chromatic correction is enabled, it is applied before the nonlinear
+invariant and objective are evaluated.
 """
 import math
 import numpy as np
 
-# NAME CALLINGS
-def _magnet_field_index(field):  #field name to integer
+# =============================================================================
+# 1. COMPACT DATA ACCESS
+# =============================================================================
+def _magnet_field_index(field):
     names = ("NAME", "TYPE", "LENGTH", "ANGLE", "K", "S", "O", "M", "M5")
     try:
         return names.index(str(field).upper())
     except ValueError as exc:
         raise KeyError(f"Unknown magnet field: {field}") from exc
-def _linear_data_index(field): #linear data to integer
+def _linear_data_index(field):
     names = (
         "CS0", "DISP0", "LATTICE_M4", "LATTICE_M5", "TUNE_X", "TUNE_Y",
         "CHROM_X", "CHROM_Y", "EMITTANCE", "CIRCUMFERENCE", "S_VALUES",
@@ -28,13 +39,15 @@ def _linear_data_index(field): #linear data to integer
         return names.index(key)
     except ValueError as exc:
         raise KeyError(f"Unknown linear-data field: {field}") from exc
-def magnet_field(elem, field):  #return the value of that field in elem
+def magnet_field(elem, field):
     return elem[_magnet_field_index(field)]
-def set_magnet_field(elem, field, value): #Allows you to edit one of the magnects fields
+def set_magnet_field(elem, field, value):
     elem[_magnet_field_index(field)] = value
-def linear_data(data, field):  #recover info from data by using names
+def linear_data(data, field):
     return data[_linear_data_index(field)] 
-# LINEAR TRANSFER MATRICES
+# =============================================================================
+# 2. LINEAR ELEMENT TRANSFER MATRICES
+# =============================================================================
 
 def plane_matrix(L, k):
     """Generic 2x2 uncoupled linear map for constant focusing k."""
@@ -155,7 +168,9 @@ def refresh_matrices(lattice): #Recompute M and M5 for all unique magnets in a l
     for elem in unique_magnets(lattice):
         compute_matrices(elem)
 
-# LATTICE CONSTRUCTION AND EDITING
+# =============================================================================
+# 3. LATTICE CONSTRUCTION AND EDITING
+# =============================================================================
 def build_lattice(names, magnets): #Replace every lattice name by its magnet list.
     magnet_by_name = {elem[0]: elem for elem in magnets}
 
@@ -187,7 +202,9 @@ def set_sextupole_strength(lattice, family_name, strength): #Update S. No M/M5 r
     elem[5] = float(strength)
 
 
-# LINEAR OPTICS
+# =============================================================================
+# 4. PERIODIC LINEAR OPTICS
+# =============================================================================
 def courant_snyder_matrix(matrix):
     return np.array([
         [matrix[0, 0]**2, -2*matrix[0, 0]*matrix[0, 1], matrix[0, 1]**2, 0, 0, 0],
@@ -597,7 +614,9 @@ def correct_chromaticity_from_data( #Chromatic correction reusing optics already
     return S1, S2, corrected_x, corrected_y
 
 
-# PREPARATION / EFFICIENT UPDATE
+# =============================================================================
+# 5. PREPARATION / DEPENDENCY-AWARE UPDATE
+# =============================================================================
 def prepare_lattice(
     parameters,
     ring_names,
@@ -612,7 +631,11 @@ def prepare_lattice(
     repetitions,
     step,
 ):
-    """Build a configured ring and prepare its linear data."""
+    """Build the initial lattice, linear optics, and chromatic correction.
+
+    The returned parameter dictionary may differ from the input because the
+    two chromatic-correction family strengths are solved and written back.
+    """
     p = parameters.copy()
 
     magnets = magnet_builder(p)
@@ -652,7 +675,7 @@ def prepare_lattice(
     return magnets, lattice, data, correction, p
 
 
-def update_linear( #Updating the linear data when changed some varialbes
+def update_linear(
     lattice,
     data,
     parameters,
@@ -671,7 +694,18 @@ def update_linear( #Updating the linear data when changed some varialbes
     correction_parameter_map,
     energy_parameter,
 ):
-    """Update edited parameters and repeat only the affected calculations."""
+    """Apply parameter edits while repeating only affected calculations.
+
+    Order:
+      1. rebuild affected magnet fields from magnet_builder(parameters);
+      2. refresh element M4/M5 only for LENGTH, ANGLE, or K changes;
+      3. recompute periodic linear optics only for linear_variables;
+      4. solve chromatic families after any linear/chromatic change;
+      5. return lattice, data, correction, and updated parameters.
+
+    A sextupole strength S does not change its drift-like linear transfer
+    matrix, but it still changes chromaticity and the later nonlinear map.
+    """
     p = parameters.copy()
     data = list(data)
     edited = set(edited_variables)
@@ -739,7 +773,9 @@ def update_linear( #Updating the linear data when changed some varialbes
 
     return lattice, data, correction, p
 
-# OPTIONAL TESTING, REPORTING, AND PLOTTING
+# =============================================================================
+# 6. CONSISTENCY CHECKS
+# =============================================================================
 def check_linear_lattice(lattice, data):
     """Return basic consistency errors for the current linear lattice."""
     M4 = data[2]
