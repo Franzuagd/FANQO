@@ -1,4 +1,10 @@
-"""Internal Matplotlib backend helpers."""
+"""Internal Matplotlib backend selection.
+
+Long FANQO runs are commonly executed in screen/SSH/DWService sessions with no
+GUI. When SHOW_PLOTS is false we force Matplotlib's Agg backend so saving figures
+does not depend on an X server. Interactive display is allowed only from the
+main Python thread.
+"""
 
 from __future__ import annotations
 
