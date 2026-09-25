@@ -1,8 +1,23 @@
-"""One-time physical calibration of FANQO's nonlinear normalization box.
+"""One-time physical calibration of FANQO's a_box normalization.
 
-This module contains the relatively long a_box calibration workflow so the
-public API stays small and readable.  Users should normally call
-``fanqo.optimize_a_box()``, not functions in this module directly.
+a_box is not a magnet parameter. It defines the physical half-widths used to
+scale the polynomial basis in the weighted least-squares invariant method.
+
+Calibration workflow:
+
+    physical full-ring tracking ONCE
+      -> keep complete survivor trajectories
+      -> estimate a seed box from survivor coordinate envelopes
+      -> build one reference nonlinear transfer
+      -> short CMA-ES search in log(a_box)
+      -> score every candidate on the SAME saved trajectories
+      -> fully rebuild the winning nonlinear state once
+      -> keep that a_box fixed for the later magnet optimization
+
+Keeping the trajectories fixed is essential: candidate boxes are compared
+against identical physical data rather than against different tracking samples.
+
+Users normally call fanqo.optimize_a_box() through the public API.
 """
 
 from __future__ import annotations
@@ -39,7 +54,12 @@ def _surviving_tracking_a_box_seed(
     min_fraction,
     optimize_mask,
 ):
-    """Propose a_box from the envelope of particles that survive all turns."""
+    """Propose a_box from the envelope of particles that survive all turns.
+
+    For each coordinate use a chosen absolute-value quantile, multiply by a
+    safety margin, and never shrink below min_fraction of the user's current
+    box. Only entries enabled by optimize_mask are changed.
+    """
     survivors = [
         track
         for track, meta in zip(trajectories, tracking_meta)
@@ -223,6 +243,8 @@ def optimize_a_box(
     initial[:, 0] += 1.0e-3 * np.asarray([p[0] for p in launch_pairs])
     initial[:, 2] += 1.0e-3 * np.asarray([p[1] for p in launch_pairs])
 
+    # This is the only physical particle-tracking call in the calibration.
+    # Everything below reuses these trajectories.
     trajectories, tracking_meta = api._track_initial_conditions(
         ring,
         initial,
@@ -274,6 +296,8 @@ def optimize_a_box(
     )
 
     # Expensive nonlinear transfer is constructed once in the current basis.
+    # Build the expensive nonlinear transfer once. Candidate a_box values are
+    # compared by changing normalization/rescaling, not by retracking particles.
     reference_transfer, _, _ = opt.nonlinear_transfer(context, tol)
 
     history = []
@@ -317,6 +341,8 @@ def optimize_a_box(
     best_score = float(seed_score)
     best_diagnostics = dict(seed_diagnostics)
 
+    # Search multiplicative factors exp(u) around the survivor-derived seed.
+    # Working in log-space guarantees positive half-widths.
     active = np.flatnonzero(optimize_mask)
     if active.size:
         import cma
