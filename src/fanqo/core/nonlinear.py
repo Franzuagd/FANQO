@@ -1,10 +1,40 @@
-"""General nonlinear polynomial/invariant machinery.
+"""Nonlinear polynomial maps and quasi-invariant mathematics.
 
-This module contains only imports and reusable functions.  It has no machine-
-specific Hamiltonian, polynomial order, phase-space box, plotting settings, or
-executable main().  Those choices belong in general_config.py and the runner.
+Reading guide
+-------------
+This module is easiest to understand in five layers:
 
-The linear accelerator itself is supplied by linear_lattice.py and the lattice file selected by general_config.py.
+1. Polynomial representation
+   idx_to_vec maps coefficient index -> [delta,x,y,px,py] exponent vector.
+   vec_to_idx is the inverse lookup.
+
+2. Lie algebra
+   The Poisson bracket is precomputed in the truncated monomial basis and used
+   to build Hamiltonian generator matrices.
+
+3. Element and lattice maps
+   element_transfer() constructs one polynomial map; nonlinear_transfer()
+   multiplies element maps in physical lattice order.
+
+4. Invariant construction
+   FANQO supports two constructions with the same monomial ordering:
+     a_box : weighted least-squares continuation of Courant-Snyder;
+     eigen : near-fixed eigenvector of the one-turn transfer.
+
+5. Evaluation / plotting / checks
+   Derivative matrices, polynomial reconstruction, 2-D sections, and numerical
+   consistency checks operate on the common invariant-vector representation.
+
+Important coordinate convention
+-------------------------------
+Polynomial exponents always use
+    [delta, x, y, px, py]
+
+This differs from Accelerator Toolbox tracking order
+    [x, px, y, py, delta, ct]
+
+Machine-specific choices remain in the user configuration; this module contains
+only reusable mathematics.
 """
 
 import math
@@ -117,7 +147,20 @@ def quadratic_size(n=2):
 
 
 def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
-    """Build every symbolic/numerical object needed by the nonlinear model.
+    """Build the scaled a_box polynomial representation.
+
+    Conceptually this function performs four jobs:
+
+    1. enumerate the truncated monomial basis;
+    2. build the Gram matrix G and diagonal monomial scale epsilon;
+    3. precompute the Poisson-bracket tensor in that scaled basis;
+    4. convert the symbolic Hamiltonian into reusable Lie-generator matrices.
+
+    The output is a dictionary because the same basis data must be reused for
+    thousands of objective evaluations during an optimization.
+
+    Parameters
+    ----------
 
     Parameters
     ----------
@@ -147,6 +190,9 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
         raise ValueError("field_symbols must contain exactly five symbols [b1,b2,b3,b4,b5].")
 
     ndim = 2 * n
+
+    # Basis bookkeeping. Every coefficient index k corresponds to one exponent
+    # vector [delta_degree, x_degree, y_degree, px_degree, py_degree].
     idx_to_vec = {}
     vec_to_idx = {}
 
@@ -185,6 +231,9 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
 
     h_dict = hamiltonian_dict(variables, hamiltonian, vec_to_idx)
 
+    # G is the coefficient-space representation of the polynomial inner
+    # product on the normalized symmetric box. Odd total powers integrate to
+    # zero, which explains the parity test below.
     G = np.zeros((size, size), dtype=float)
     for i in range(size):
         fi = idx_to_vec[i]
@@ -210,6 +259,8 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
     if np.any(a_box <= 0.0):
         raise ValueError("Every a_box entry must be positive.")
 
+    # epsilon rescales each physical monomial using the chosen a_box. This is
+    # what makes coefficients from very different physical powers comparable.
     epsilon = np.zeros(size, dtype=float)
     for i in range(size):
         fi = idx_to_vec[i]
@@ -298,8 +349,22 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
 
 
 def load_eigen(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
-    """Build the reference eigenvector nonlinear model on FANQO's monomial ordering.
+    """Build the unscaled eigenvector representation on the same monomial order.
 
+    The exponent dictionaries are intentionally identical to load(). The
+    difference is mathematical representation, not basis notation:
+
+      * coefficient scale C = 1;
+      * epsilon = 1;
+      * G is the physical-monomial Gram matrix on a unit symmetric box;
+      * M(H)f = {H,f};
+      * thick transport is exp(+L M).
+
+    Keeping the same idx_to_vec / vec_to_idx interface is what lets every
+    downstream objective, plot, and report consume Ix without caring how the
+    invariant was constructed.
+
+    """
     The exponent dictionaries and monomial basis are exactly the same as in
     load(). The representation differs: there is no a_box coefficient
     normalization, the coordinate scale is (1,1,1,1,1), the Gram matrix is
@@ -393,7 +458,13 @@ def load_eigen(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
 
 
 def assemble_M(h_vec, M_basis):
-    """Assemble the Lie-generator matrix from Hamiltonian coefficients."""
+    """Assemble M(H) by linearly combining precomputed basis generators.
+
+    h_vec contains the Hamiltonian coefficients for one element. M_basis holds
+    the matrix representation associated with each Hamiltonian basis monomial.
+    The expensive bracket algebra is therefore done once in load()/load_eigen(),
+    not once per magnet and not once per optimizer candidate.
+    """
     if not M_basis:
         raise ValueError("M_basis is empty.")
     M = np.zeros(M_basis[0].shape, dtype=float)
@@ -439,8 +510,12 @@ def element_transfer(
     """Construct the nonlinear polynomial transfer matrix of one element.
 
     Sign convention is selected by the nonlinear state:
-        a_box:        M(H)f={f,H},  T=exp(-L M)
-        eigen:M(H)f={H,f},  T=exp(+L M)
+        a_box : M(H)f={f,H}, T=exp(-L M)
+        eigen : M(H)f={H,f}, T=exp(+L M)
+
+    The two lines use opposite definitions of the Lie operator, so the opposite
+    exponential signs are part of the convention rather than two different
+    physical Hamiltonian flows.
 
     For a zero-length octupole, O is already the integrated strength.  The
     integrated transport generator uses the same state-dependent sign and the kick is
@@ -687,7 +762,14 @@ def initialize_nonlinear_for_method(
 
 
 def quadratic_invariants(data, state):
-    """Build the normalized horizontal and vertical Courant-Snyder vectors."""
+    """Embed the linear Courant-Snyder invariants in the quadratic basis.
+
+    Horizontal:
+        Sx = gamma_x x^2 + 2 alpha_x x px + beta_x px^2
+
+    Vertical is analogous. Division by C converts physical polynomial
+    coefficients into FANQO's stored coefficient representation.
+    """
     bx0, ax0, gx0, by0, ay0, gy0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
     vec_to_idx = state["vec_to_idx"]
     C = state["C"]
@@ -811,8 +893,18 @@ def eigen_invariant(
     plane="x",
     imag_tol=1.0e-12,
 ):
-    """Construct an invariant by diagonalizing transfer-I.
+    """Construct a near-invariant eigenvector of the one-turn transfer.
 
+    The ideal invariant coefficient vector satisfies T c = c, equivalently
+    (T-I)c = 0. Numerically we diagonalize T-I, retain near-zero real positive
+    eigenvalues, normalize candidate quadratic blocks with
+
+        c_q2*c_p2 - (c_qp/2)^2 = 1,
+
+    and select the candidate with the implemented mixed-quadratic residual
+    criterion. The normalization removes the arbitrary eigenvector amplitude.
+
+    """
     This follows the active nlfe selection in the reference implementation while using
     FANQO's monomial indexing.
     """
@@ -894,7 +986,16 @@ def eigen_invariant(
 
 
 def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
-    """Solve the weighted least-squares nonlinear invariant problem."""
+    """Solve both least-squares invariants using the block map.
+
+    With c = [S; h] and the upper-right block equal to zero, T c = c reduces in
+    the nonlinear sector to
+
+        (I - T_nn) h = T_nq S.
+
+    FANQO solves this in the G_nn metric while keeping the quadratic
+    Courant-Snyder vector S fixed.
+    """
     Gnn = state["Gnn"]
     B = state["B"]
     G = state["G"]
