@@ -1,4 +1,14 @@
-"""Load and validate user-selected Python configuration files."""
+"""Load and validate FANQO's two user-editable configuration modules.
+
+general_config.py chooses the experiment: polynomial order, Hamiltonian,
+invariant construction, optimizer settings, plots, FMA, and output paths.
+
+lattice_config.py defines the machine: parameters, magnet families, lattice
+order, dependency maps, and chromatic-correction families.
+
+This module checks that those ordinary Python files satisfy the interface
+expected by the numerical core. It performs no accelerator calculation itself.
+"""
 
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -44,7 +54,12 @@ def resolve_config_path(file_name, *, relative_to=None):
 
 
 def load_python_file(file_name, *, relative_to=None, module_prefix="user_config", reload=False):
-    """Load an arbitrary Python file and return it as a module object."""
+    """Load a Python configuration file as an isolated module.
+
+    A path-derived module name prevents same-named config files in different
+    experiment folders from colliding. reload=True is important for workflows
+    that rewrite a temporary runtime config between runs.
+    """
     path = resolve_config_path(file_name, relative_to=relative_to)
 
     if not path.is_file():
@@ -125,13 +140,19 @@ def load_selected_lattice(general_cfg, *, reload=False):
 
 
 def analysis_ring_names(general_cfg, lattice_cfg):
-    """Return the ring used for nonlinear/invariant analysis."""
+    """Return the lattice names used for nonlinear/invariant analysis.
+
+    ANALYSIS_CELLS is separate from the full physical ring used by tracking.
+    A one-cell polynomial model can therefore coexist with full-ring FMA.
+    """
     cells = int(general_cfg.ANALYSIS_CELLS)
     if cells < 1 or cells != general_cfg.ANALYSIS_CELLS:
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
 
     return list(lattice_cfg.CELL_NAMES) * cells
 
+# Minimum settings needed to build the computational context. Plotting and
+# tracking have additional optional settings handled by the public API.
 _REQUIRED_GENERAL_SETTINGS = (
     "LATTICE_FILE","ANALYSIS_CELLS","VARY","VARIABLES","FIELD_SYMBOLS",
     "HAMILTONIAN","ORDER","DELTA_ORDER","N_PLANES","INVARIANT_CONSTRUCTION","A_BOX",
@@ -140,14 +161,18 @@ _REQUIRED_GENERAL_SETTINGS = (
     "SCALES","CMA_TIME","POWELL_TIME_FRACTION",
 )
 def validate_general_config(general_cfg):
-    missing=[name for name in _REQUIRED_GENERAL_SETTINGS if not hasattr(general_cfg,name)]
+    """Validate the experiment settings needed by the computational core."""
+    missing = [
+        name for name in _REQUIRED_GENERAL_SETTINGS
+        if not hasattr(general_cfg, name)
+    ]
     if missing:
-        source=getattr(general_cfg,"__file__","<unknown>")
+        source = getattr(general_cfg, "__file__", "<unknown>")
         raise AttributeError(
             f"Invalid general configuration '{source}'.\nMissing required setting(s):\n    "
             + "\n    ".join(missing)
         )
-    if int(general_cfg.ANALYSIS_CELLS)<1:
+    if int(general_cfg.ANALYSIS_CELLS) < 1:
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
     method = str(general_cfg.INVARIANT_CONSTRUCTION).lower()
     if method not in {"a_box", "eigen"}:
@@ -156,5 +181,11 @@ def validate_general_config(general_cfg):
         )
     return general_cfg
 def load_general_config(file_name="general_config.py", *, relative_to=None, reload=False):
-    cfg=load_python_file(file_name, relative_to=relative_to, module_prefix="general", reload=reload)
+    """Load the experiment configuration and validate its core settings."""
+    cfg = load_python_file(
+        file_name,
+        relative_to=relative_to,
+        module_prefix="general",
+        reload=reload,
+    )
     return validate_general_config(cfg)
