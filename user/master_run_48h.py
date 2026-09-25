@@ -28,6 +28,19 @@ Run from the user directory, for example:
 
 The generated _master_runtime_config.py is intentionally kept beside this file
 so a failed case can be reproduced easily.
+
+Reading guide
+-------------
+This file adds no new accelerator mathematics. It is experiment orchestration.
+Review it only after understanding fq.load(), fq.optimize(), optimize_a_box(),
+and the objective functions.
+
+The fairness rules are:
+  * every case starts from the same original lattice parameters;
+  * both invariant constructions use the same m,d in the comparison;
+  * a_box is calibrated once and reused only by a_box-construction cases;
+  * baseline FMA is not repeated inside every optimizer case;
+  * each case writes to a separate output folder and config snapshot.
 """
 
 from __future__ import annotations
@@ -136,7 +149,11 @@ COMMON_SLICE_SETTINGS = dict(
 
 
 def build_objectives():
-    """Return all objectives that can be passed directly to fq.optimize()."""
+    """Build the nine objective callables used in the comparison matrix.
+
+    configured_objective() freezes common slice/discretization settings while
+    preserving each objective's .requires contract for the optimizer.
+    """
     return [
         (
             "horizontal_shape",
@@ -239,7 +256,11 @@ CONSTRUCTIONS = ("a_box", "eigen")
 
 
 def build_cases():
-    """Interleave constructions so partial campaigns still contain pairs."""
+    """Create objective x construction cases in paired order.
+
+    Interleaving a_box/eigen for each objective makes a partially completed run
+    more scientifically useful than grouping all cases of one construction first.
+    """
     cases = []
     for objective_name, objective in build_objectives():
         for construction in CONSTRUCTIONS:
@@ -573,7 +594,11 @@ def run_constructor_baselines(state, best_a_box, initial_a_box):
 
 
 def cma_budget_for_next_case(state, cases_left):
-    """Allocate the remaining campaign wall time among unfinished cases."""
+    """Allocate remaining wall time among cases that can still run.
+
+    The buffer protects final plots/reports. OPTIMIZER_SHARE_OF_CASE reserves
+    some per-case time outside CMA/Powell for setup and diagnostics.
+    """
     final_buffer = FINAL_BUFFER_MINUTES * 60.0
     remaining = (
         campaign_deadline(state)
