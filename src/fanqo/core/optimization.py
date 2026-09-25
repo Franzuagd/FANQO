@@ -1,8 +1,22 @@
-"""Functions used by the nonlinear optimizer.
+"""Optimization engine connecting lattice edits, invariants, and objectives.
 
-The lattice is prepared once.  Every candidate is applied with
-linear_lattice.update_linear().  The nonlinear polynomial state is also built
-once and reused during the optimization.
+The central object in this module is the context dictionary. It stores the
+ordered lattice, current linear optics, scalar parameters, nonlinear polynomial
+state, reusable element-map cache, and settings needed to update the experiment.
+
+One objective evaluation follows this chain:
+
+    candidate parameters
+      -> apply_candidate()
+      -> dependency-aware linear/chromatic update
+      -> nonlinear_transfer()
+      -> construct requested invariant(s)
+      -> call Fobj(data)
+      -> return a finite score or INVALID_PENALTY
+
+CMA-ES explores globally for the configured wall-clock budget; Powell may then
+refine the best point locally. Invalid candidates are rolled back so they never
+corrupt the active context.
 """
 
 from pathlib import Path
@@ -53,6 +67,8 @@ def create_context(
     n_planes=2,
     invariant_construction="a_box",
 ):
+    # Build a self-consistent linear lattice first. When chromatic
+    # correction is enabled, corrected family strengths are written into p.
     magnets, lattice, data, correction, p = lin.prepare_lattice(
         parameters=parameters,
         ring_names=ring_names,
@@ -80,6 +96,8 @@ def create_context(
         invariant_construction=invariant_construction,
     )
 
+    # The context joins linear and nonlinear state. It is mutated in place
+    # during optimization, so failed candidates must restore a snapshot.
     return {
         "magnets": magnets,
         "lattice": lattice,
@@ -305,7 +323,15 @@ def _refresh_nonlinear_normalization(state, data):
 
 
 def apply_candidate(context, v, vary):
-    """Apply one optimizer vector using linear_lattice.update_linear()."""
+    """Apply one optimizer vector while preserving a consistent experiment.
+
+    The scalar parameter dictionary is edited first. linear.update_linear()
+    repeats only the linear/chromatic work affected by those names. If the
+    underlying linear optics changed, the nonlinear normalization/derivative
+    operators are refreshed before the next invariant is constructed.
+
+    A snapshot is restored if any step fails.
+    """
     v = np.asarray(v, dtype=float)
     if len(v) != len(vary):
         raise ValueError(f"Expected {len(vary)} variables, received {len(v)}.")
@@ -378,7 +404,12 @@ def _magnet_signature(elem):
 
 
 def nonlinear_transfer(context, tol):
-    """Build the ring transfer, reusing maps of unchanged magnets."""
+    """Build the ordered polynomial transfer while reusing unchanged maps.
+
+    The cache key is the complete physical element signature
+    (TYPE, LENGTH, ANGLE, K, S, O). Any changed strength or geometry therefore
+    invalidates only the maps that actually changed.
+    """
     state = context["state"]
     transfer = np.eye(len(state["idx_to_vec"]), dtype=float)
     cache = context["map_cache"]
@@ -406,7 +437,15 @@ def nonlinear_transfer(context, tol):
 
 
 def _solve_invariant(S, tnn, tnq, state, tol):
-    """Solve one weighted least-squares quasi-invariant plane."""
+    """Solve one weighted least-squares quasi-invariant plane.
+
+    For c=[S;h], periodicity T c = c gives
+
+        (I - T_nn) h = T_nq S.
+
+    Multiplying by a Cholesky factor of G_nn turns the weighted polynomial norm
+    into an ordinary Euclidean least-squares problem.
+    """
     Gnn = state["Gnn"]
     D = np.eye(state["nonquad_size"], dtype=float) - tnn
     U = tnq @ S
@@ -434,7 +473,17 @@ def prepare_objective_data(
     compute_iy=False,
     extra_data=None,
 ):
-    """Compute only the quantities requested by Fobj.requires."""
+    """Compute only the expensive quantities declared by Fobj.requires.
+
+    Examples:
+      {Ix}          -> build the transfer and requested Ix;
+      {Ix,Sx}       -> also provide the Courant-Snyder reference;
+      {Ix,transfer} -> keep the full T for transport-defect objectives.
+
+    This dependency contract keeps objective functions independent of the
+    invariant constructor. The objective asks for Ix; this function decides
+    whether Ix comes from least squares or from the eigen construction.
+    """
     requirements = objective_requirements(Fobj)
     extra_data = {} if extra_data is None else dict(extra_data)
 
@@ -580,7 +629,12 @@ def evaluate_candidate(
     tol,
     invalid_penalty,
 ):
-    """Update one candidate and evaluate an arbitrary FANQO objective."""
+    """Evaluate one optimizer candidate without corrupting valid state.
+
+    The context is snapshotted before mutation. A finite candidate returns its
+    objective value. Numerical or physical failures restore the snapshot and
+    return the configured penalty so the search can continue.
+    """
     snapshot = _snapshot_mutable_context(context)
     try:
         apply_candidate(context, v, vary)
@@ -767,6 +821,14 @@ def hybrid_optimize(
     plot_root,
     slice_settings,
 ):
+    """Run start diagnostics, CMA-ES, Powell, and final diagnostics.
+
+    The search budget is wall-clock based but is not a hard process deadline:
+    one invariant/objective evaluation is always allowed to finish.
+
+    CMA search scales use abs(v0) for nonzero parameters. Parameters starting at
+    zero use the user SCALES entry so they still have a meaningful step size.
+    """
     try:
         import cma
     except ImportError as exc:
