@@ -1,7 +1,27 @@
-"""Public stateful API.
+"""Public, stateful FANQO interface.
 
-Internal numerical routines live under :mod:`fanqo.core`.
-Users should normally import this package and call the functions defined here.
+This file is orchestration, not the place where the core mathematics lives.
+The public API translates user actions into calls to the linear, nonlinear, and
+optimization modules while keeping the active experiment in STATE.
+
+Typical state transition:
+
+    fq.load(...)
+        -> STATE.context contains a self-consistent lattice/model
+
+    fq.compute_invariants()
+        -> STATE.Ix / STATE.Iy become available
+
+    fq.optimize(Fobj)
+        -> magnet parameters are optimized in-place
+        -> final invariants become active
+        -> STATE.source becomes "optimized"
+
+    plotting / FMA / reports
+        -> read the currently active context and invariants
+
+When reviewing this file, focus on call order and state ownership. The detailed
+equations are implemented under fanqo.core.
 """
 
 from __future__ import annotations
@@ -59,6 +79,7 @@ def _require_invariant(action, plane=None):
 
 
 def _set_invariants(details):
+    # Store copies rather than references to temporary diagnostic dictionaries.
     STATE.invariant_details = details
     STATE.Ix = (
         np.asarray(details["Ix"], dtype=float).copy()
@@ -71,6 +92,8 @@ def _set_invariants(details):
 
 
 def _clear_derived():
+    # A parameter/config reload invalidates every result derived from the old
+    # context. Linear/context reconstruction happens separately.
     STATE.Ix = None
     STATE.Iy = None
     STATE.invariant_details = None
@@ -123,6 +146,7 @@ def _slice_settings(save=None, show=None):
 
 
 def _build_context(parameters):
+    """Bridge user configuration into the optimization context constructor."""
     cfg = _cfg()
     lattice_cfg = STATE.lattice_config
     return opt.create_context(
@@ -157,7 +181,12 @@ def _build_context(parameters):
 # =============================================================================
 
 def load(config_file="general_config.py", *, force=False):
-    """Load a general config and the lattice file selected by LATTICE_FILE."""
+    """Create a fresh active experiment from user configuration.
+
+    Loading deliberately starts from lattice_config.PARAMETERS rather than from
+    any previously optimized state. force=True also reloads Python config
+    modules, which is essential for the 48-hour campaign runtime configs.
+    """
     cfg = load_general_config(config_file, reload=bool(force))
     STATE.config = cfg
     STATE.config_path = str(Path(cfg.__file__).resolve())
@@ -311,7 +340,12 @@ def plot_linear(*, file_name=None, save=None, show=None):
 # =============================================================================
 
 def compute_invariants():
-    """Compute only the invariant planes enabled in general_config.py."""
+    """Compute only invariant planes enabled in general_config.py.
+
+    The actual constructor is selected inside the nonlinear state:
+    a_box uses weighted least squares; eigen diagonalizes the one-turn map.
+    The public return representation is the same in both cases.
+    """
     cfg = _cfg()
     context = _require_context("compute_invariants()")
     compute_ix = bool(getattr(cfg, "COMPUTE_IX", True))
@@ -608,7 +642,13 @@ def _tracking_plots(fmap,ix_data,native,out,label,coords,delta,save,show):
 
 
 def run_fma(*, stage="current", quick=False):
-    """Run FMA and full-ring Ix tracking using the active lattice and Ix."""
+    """Run independent full-ring tracking diagnostics.
+
+    Important distinction: ANALYSIS_CELLS controls the polynomial map used to
+    construct Ix, whereas FMA builds/inferes a physical 360-degree tracking
+    ring. This routine therefore validates the invariant against particle
+    dynamics rather than merely re-evaluating the optimization surrogate.
+    """
     context=_require_invariant("run_fma()", "x"); cfg=_cfg()
     if importlib.util.find_spec("at") is None:
         raise ImportError('Install tracking support with: python -m pip install -e ".[tracking]"')
@@ -1091,7 +1131,20 @@ def write_full_report(file_name=None):
 # =============================================================================
 
 def optimize(Fobj, *, run_start_end_fma=None, quick=False):
-    """Run the hybrid optimizer using the supplied objective Python function."""
+    """Run the complete nonlinear magnet optimization.
+
+    High-level order:
+      1. optionally calibrate a_box once;
+      2. inspect Fobj.requires and compute start diagnostics;
+      3. optionally run start FMA/tracking;
+      4. run CMA-ES plus optional Powell refinement;
+      5. make the winning lattice/invariant the active STATE;
+      6. optionally run end FMA/tracking;
+      7. save lattice and reports.
+
+    Fobj is passed explicitly so objective choice remains independent of
+    INVARIANT_CONSTRUCTION.
+    """
     if STATE.context is None:
         load()
     cfg = _cfg()
@@ -1099,6 +1152,8 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
         raise TypeError("Fobj must be a callable objective function.")
     opt.objective_requirements(Fobj)
 
+    # a_box calibration is a preprocessing step, not part of every magnet
+    # candidate. Once active, the selected box remains fixed during optimization.
     construction = str(cfg.INVARIANT_CONSTRUCTION).lower()
     a_box_mode = str(getattr(cfg, "A_BOX_MODE", "fixed")).lower()
     if a_box_mode not in {"fixed", "auto"}:
@@ -1152,6 +1207,8 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
 
     context = STATE.context
     v0 = opt.initial_vector(cfg.VARY, context["parameters"])
+    # Full diagnostics are allowed to compute more information than a single
+    # CMA candidate. Candidate evaluations themselves stay requirement-driven.
     start = opt.full_diagnostics(
         context,
         Fobj,
@@ -1202,6 +1259,8 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
         slice_settings=plot_settings,
     )
 
+    # The optimizer returns the winning mutable context. From this point on,
+    # plots/reports refer to the optimized machine unless the user reloads.
     STATE.context = result["context"]
     _set_invariants(result["final_details"])
     STATE.source = "optimized"
