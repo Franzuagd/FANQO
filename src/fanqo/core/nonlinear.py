@@ -365,12 +365,6 @@ def load_eigen(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
     invariant was constructed.
 
     """
-    The exponent dictionaries and monomial basis are exactly the same as in
-    load(). The representation differs: there is no a_box coefficient
-    normalization, the coordinate scale is (1,1,1,1,1), the Gram matrix is
-    built for physical monomials on the unit symmetric box, and M represents
-    {H,f}, matching the reference convention T=exp(+L M).
-    """
     dim = len(variables)
     a_box = np.asarray(a_box, dtype=float)
     if a_box.shape != (dim,):
@@ -904,9 +898,6 @@ def eigen_invariant(
     and select the candidate with the implemented mixed-quadratic residual
     criterion. The normalization removes the arbitrary eigenvector amplitude.
 
-    """
-    This follows the active nlfe selection in the reference implementation while using
-    FANQO's monomial indexing.
     """
     transfer = np.asarray(transfer, dtype=float)
     size = len(state["idx_to_vec"])
