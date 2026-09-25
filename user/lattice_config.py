@@ -1,11 +1,23 @@
-"""Editable definition of the accelerator lattice used.
-This is the lattice-specific file.  If the lattice, physical parameters,
-magnet definitions, parameter dependencies, or linear-model settings change, edit them here.
-The computational module linear_lattice.py should not need to be edited.
-This file may be renamed; select it with LATTICE_FILE in general_config.py.
+"""User-editable accelerator definition.
+
+This file owns machine-specific information:
+  * scalar lattice parameters;
+  * unique magnet definitions;
+  * longitudinal cell order;
+  * which parameters affect which magnet fields;
+  * which edits require linear/chromatic recomputation;
+  * the two sextupole families used for chromatic correction.
+
+The numerical algorithms live under fanqo.core and should not need modification
+when only the accelerator changes.
+
+Compact magnet representation:
+    [NAME, TYPE, LENGTH, ANGLE, K, S, O, M4, M5]
+
+For a zero-length "multipole", O is an integrated nonlinear kick strength.
 """
 
-def magnet(name, magnet_type, length, angle=0.0, K_value=0.0, S_value=0.0, O_value=0.0):  #Use by configuration
+def magnet(name, magnet_type, length, angle=0.0, K_value=0.0, S_value=0.0, O_value=0.0):
     """Create one magnet in the project's compact list representation."""
     return [name, magnet_type, float(length), float(angle), float(K_value), float(S_value), float(O_value), None, None]
 
@@ -51,7 +63,9 @@ def define_magnets(parameters):
     LSD = p["LSD"]
     F = p["F"]
 
-    return [   #Name/Type/strength
+    # One object is created per unique magnet family. build_lattice() later
+    # reuses these objects wherever the family name appears in CELL_NAMES.
+    return [
         # Drifts
         magnet("D1", "drift", 2.654400 - LSD),
         magnet("D4", "drift", 0.081240),
@@ -123,21 +137,29 @@ CELL_NAMES = DBA + CELA + CELA + CELA + DBA[::-1]
 # The number of cells used for the nonlinear/invariant calculation is selected
 # in general_config.py through ANALYSIS_CELLS.
 
-# 4. PARAMETER DEPENDENCIES  (Errors here are important to avoid)
+# 4. PARAMETER DEPENDENCIES
+# These sets are performance-critical metadata. They do not define which
+# parameters exist; they tell update_linear() what must be recomputed.
 
-LINEAR_VARIABLES = { #Variables that if changed, then we need to recompute the linear part.
+# Any edit here changes periodic linear optics/Twiss/dispersion.
+LINEAR_VARIABLES = {
     "energy", "LSD", "F", "X1", "X2", "X3", "X4", "X5", "X6", 
     "X7", "X8", "X9",
 } 
 
-CHROMATIC_VARIABLES = { #Variables that if changed, we need to recompute the chromatic sextupoles.
+# Any edit here changes sextupole content/chromaticity and may trigger the
+# two-family chromatic correction when CORRECT_CHROMATICITY is enabled.
+CHROMATIC_VARIABLES = {
     "kse1", "kfd2", "kfd3", "ks1", "ks2", "ksd3", "ks1s", "ks2s",
     "ksf1", "ksd1",
 }
 
-NONLINEAR_VARIABLES = {"ko1", "ko2", "ko3"}  #Variables that if changed, they only changed the non-linear transport matrix.
+# These strengths affect only the nonlinear polynomial transfer in this model.
+NONLINEAR_VARIABLES = {"ko1", "ko2", "ko3"}
 
-PARAMETER_MAP = {  #Which magnets do each variable affects. (name,parameter affected)
+# Map each scalar parameter to the concrete magnet field(s) it controls.
+# Field names match FANQO's compact representation: LENGTH, ANGLE, K, S, O.
+PARAMETER_MAP = {
     "energy": [],
     "X1": [("QF1", "K")],
     "X2": [("QD2", "K")],
@@ -174,16 +196,25 @@ PARAMETER_MAP = {  #Which magnets do each variable affects. (name,parameter affe
     ],
 }
 
-CORRECTION_PARAMETER_MAP = {  #SExtupoles used for chromatic correction
+# Convert corrected magnet-family names back to entries in PARAMETERS.
+CORRECTION_PARAMETER_MAP = {
     "SF1": "ksf1",
     "SD1": "ksd1",
 }
 
 # 5. LINEAR-MODEL SETTINGS
 ENERGY_PARAMETER = "energy"
-REPETITIONS = 1  #what is this used for?
-STEP = 0.01 #subdivition used for linear computations
-CHROMATIC_FAMILY1 = "SF1"  #Chromatic term 1   #Maybe I can make this more general.
-CHROMATIC_FAMILY2 = "SD1"  #Chromatic term 2
+
+# Number of identical copies represented when formulas convert one configured
+# analysis lattice into ring-integrated tune/chromatic quantities.
+REPETITIONS = 1
+
+# Longitudinal subdivision [m] used while propagating Twiss/dispersion and
+# integrating chromatic/radiation quantities through thick elements.
+STEP = 0.01
+
+# Two independent sextupole families solved by correct_chromaticity_from_data().
+CHROMATIC_FAMILY1 = "SF1"
+CHROMATIC_FAMILY2 = "SD1"
 TARGET_CHROM_X = 0.0
 TARGET_CHROM_Y = 0.0
