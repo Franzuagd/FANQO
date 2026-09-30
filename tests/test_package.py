@@ -2,20 +2,32 @@ import fanqo
 
 
 def test_version():
-    assert fanqo.__version__ == "0.2.1"
+    assert fanqo.__version__ == "0.3.0.dev0"
 
 
-def test_public_api():
+def test_public_api_is_invariant_only():
     public_functions = (
         "load",
         "status",
-        "linear_summary",
-        "compute_invariants",
-        "run_fma",
-        "optimize",
+        "available_methods",
+        "construct",
+        "coefficients",
+        "polynomial",
+        "construction_details",
+        "compare",
     )
     for name in public_functions:
         assert callable(getattr(fanqo, name))
+
+    assert fanqo.available_methods() == (
+        "a_box",
+        "a_box_y0",
+        "hybrid",
+        "eigen",
+    )
+
+    assert not hasattr(fanqo, "optimize")
+    assert not hasattr(fanqo, "optimize_a_box")
 
 
 def test_save_only_plot_backend():
