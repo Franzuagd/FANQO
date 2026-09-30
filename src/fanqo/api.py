@@ -215,8 +215,18 @@ def status():
             str(cfg.INVARIANT_CONSTRUCTION).lower() if cfg else None
         ),
         "active_a_box": (
-            np.asarray(STATE.context["settings"].get("a_box"), dtype=float).copy()
-            if STATE.context is not None and "a_box" in STATE.context.get("settings", {})
+            np.asarray(STATE.context["state"].get("a_box"), dtype=float).copy()
+            if STATE.context is not None
+            else None
+        ),
+        "horizontal_slice_only": (
+            bool(STATE.context["state"].get("horizontal_slice_only", False))
+            if STATE.context is not None
+            else False
+        ),
+        "active_polynomial_variables": (
+            STATE.context["state"].get("active_variables")
+            if STATE.context is not None
             else None
         ),
         "a_box_mode": (
@@ -461,7 +471,9 @@ def _fma_grid(coords_mm, steps):
     xmin,xmax=sorted(map(float,coords_mm[:2])); ymin,ymax=sorted(map(float,coords_mm[2:]))
     nx,ny=map(int,steps)
     if nx<=0 or ny<=0: raise ValueError("FMA steps must be positive.")
-    return (np.linspace(xmin,xmax,nx+1), np.linspace(ymin,ymax,ny+1))
+    xs = np.array([xmin]) if xmin == xmax else np.linspace(xmin, xmax, nx+1)
+    ys = np.array([ymin]) if ymin == ymax else np.linspace(ymin, ymax, ny+1)
+    return xs, ys
 
 
 def _infer_physical_ring_cells(parameters):
@@ -657,6 +669,12 @@ def run_fma(*, stage="current", quick=False):
     from at.physics.frequency_maps import fmap_parallel_track
 
     coords=list(cfg.FMA_COORDS_MM); steps=list(cfg.FMA_STEPS); turns=int(cfg.FMA_TURNS)
+    if context["state"].get("horizontal_slice_only", False):
+        # A reduced LS invariant is defined only on y=py=0. Keep both the AT
+        # frequency-map launch set and the Ix tracking launch set on that slice.
+        coords[2] = 0.0
+        coords[3] = 0.0
+        steps[1] = 1
     if quick:
         steps=[min(5,int(steps[0])),min(5,int(steps[1]))]; turns=min(8,turns)
 
