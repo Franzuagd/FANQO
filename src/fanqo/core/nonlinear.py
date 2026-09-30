@@ -191,19 +191,69 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
 
     ndim = 2 * n
 
-    # Basis bookkeeping. Every coefficient index k corresponds to one exponent
-    # vector [delta_degree, x_degree, y_degree, px_degree, py_degree].
+    # A_BOX[2] == 0 is an explicit request for the invariant submanifold
+    # y = py = 0.  In that mode FANQO builds a genuinely reduced horizontal
+    # polynomial space rather than approximating the slice with a tiny y box.
+    #
+    # The public exponent convention remains [delta, x, y, px, py], but every
+    # retained monomial has y_degree = py_degree = 0.  This keeps downstream
+    # labeling/evaluation compatible while making G, the Poisson algebra, and
+    # the least-squares problem depend only on (delta, x, px).
+    if np.isscalar(a_box):
+        a_box = np.full(len(variables), float(a_box))
+    else:
+        a_box = np.asarray(a_box, dtype=float)
+
+    if len(a_box) != len(variables):
+        raise ValueError(
+            f"a_box must have {len(variables)} entries, received {len(a_box)}."
+        )
+    if not np.all(np.isfinite(a_box)):
+        raise ValueError("Every a_box entry must be finite.")
+
+    horizontal_slice_only = bool(a_box[2] == 0.0)
+    if horizontal_slice_only:
+        if a_box[0] <= 0.0 or a_box[1] <= 0.0 or a_box[3] <= 0.0:
+            raise ValueError(
+                "With A_BOX[2]=0, delta, x, and px half-widths must remain positive."
+            )
+        if a_box[4] < 0.0:
+            raise ValueError("The py half-width cannot be negative.")
+        a_box = a_box.copy()
+        a_box[2] = 0.0
+        a_box[4] = 0.0
+    elif np.any(a_box <= 0.0):
+        raise ValueError(
+            "Every a_box entry must be positive, except A_BOX[2]=0 which "
+            "activates the horizontal y=py=0 LS mode."
+        )
+
+    # Basis bookkeeping. Every coefficient index k still uses the public
+    # [delta,x,y,px,py] exponent vector.
     idx_to_vec = {}
     vec_to_idx = {}
 
-    layer_size = sum(comb(s + ndim - 1, ndim - 1) for s in range(m + 1))
-
-    for delta_degree in range(d + 1):
-        offset = delta_degree * layer_size
-        for idx in range(layer_size):
-            v = [delta_degree] + vectormap(idx, ndim)
-            idx_to_vec[offset + idx] = v
-            vec_to_idx[tuple(v)] = offset + idx
+    if horizontal_slice_only:
+        active_transverse_dim = 2  # x, px
+        layer_size = sum(
+            comb(s + active_transverse_dim - 1, active_transverse_dim - 1)
+            for s in range(m + 1)
+        )
+        for delta_degree in range(d + 1):
+            offset = delta_degree * layer_size
+            for idx in range(layer_size):
+                x_degree, px_degree = vectormap(idx, active_transverse_dim)
+                v = [delta_degree, x_degree, 0, px_degree, 0]
+                idx_to_vec[offset + idx] = v
+                vec_to_idx[tuple(v)] = offset + idx
+    else:
+        layer_size = sum(comb(s + ndim - 1, ndim - 1) for s in range(m + 1))
+        for delta_degree in range(d + 1):
+            offset = delta_degree * layer_size
+            for idx in range(layer_size):
+                v = [delta_degree] + vectormap(idx, ndim)
+                idx_to_vec[offset + idx] = v
+                vec_to_idx[tuple(v)] = offset + idx
 
     size = len(idx_to_vec)
     dim = len(idx_to_vec[0])
@@ -216,7 +266,7 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
             fj = idx_to_vec[j]
             base = [fi[t] + fj[t] for t in range(dim)]
 
-            for plane in range(n):
+            for plane in range(1 if horizontal_slice_only else n):
                 q_idx = 1 + plane
                 p_idx = 3 + plane
                 if base[q_idx] == 0 or base[p_idx] == 0:
@@ -248,16 +298,6 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
                 val *= np.sqrt((2 * fi[l] + 1) * (2 * fj[l] + 1)) / (s_ij + 1)
             G[i, j] = val
             G[j, i] = val
-
-    if np.isscalar(a_box):
-        a_box = np.full(dim, float(a_box))
-    else:
-        a_box = np.asarray(a_box, dtype=float)
-
-    if len(a_box) != dim:
-        raise ValueError(f"a_box must have {dim} entries, received {len(a_box)}.")
-    if np.any(a_box <= 0.0):
-        raise ValueError("Every a_box entry must be positive.")
 
     # epsilon rescales each physical monomial using the chosen a_box. This is
     # what makes coefficients from very different physical powers comparable.
@@ -338,10 +378,16 @@ def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
         "M_octupole_unit": M_octupole_unit,
         "order": order,
         "H_dict": h_dict,
-        "quad_size": quadratic_size(n),
-        "nonquad_size": size - quadratic_size(n),
+        "quad_size": quadratic_size(1 if horizontal_slice_only else n),
+        "nonquad_size": size - quadratic_size(1 if horizontal_slice_only else n),
         "monomial_basis": build_monomial_basis(variables, idx_to_vec),
         "a_box": a_box.copy(),
+        "horizontal_slice_only": horizontal_slice_only,
+        "active_variables": (
+            ("delta", "x", "px")
+            if horizontal_slice_only
+            else ("delta", "x", "y", "px", "py")
+        ),
         "invariant_construction": "a_box",
         "transport_sign": -1.0,
         "coordinate_scale": np.asarray(a_box, dtype=float).copy(),
@@ -772,15 +818,17 @@ def quadratic_invariants(data, state):
     idx_x2 = vec_to_idx[(0, 2, 0, 0, 0)]
     idx_xpx = vec_to_idx[(0, 1, 0, 1, 0)]
     idx_px2 = vec_to_idx[(0, 0, 0, 2, 0)]
-    idx_y2 = vec_to_idx[(0, 0, 2, 0, 0)]
-    idx_ypy = vec_to_idx[(0, 0, 1, 0, 1)]
-    idx_py2 = vec_to_idx[(0, 0, 0, 0, 2)]
-
     Sx = np.zeros(q, dtype=float)
     Sx[idx_x2] = gx0 / C[idx_x2]
     Sx[idx_xpx] = 2.0 * ax0 / C[idx_xpx]
     Sx[idx_px2] = bx0 / C[idx_px2]
 
+    if state.get("horizontal_slice_only", False):
+        return Sx, None
+
+    idx_y2 = vec_to_idx[(0, 0, 2, 0, 0)]
+    idx_ypy = vec_to_idx[(0, 0, 1, 0, 1)]
+    idx_py2 = vec_to_idx[(0, 0, 0, 0, 2)]
     Sy = np.zeros(q, dtype=float)
     Sy[idx_y2] = gy0 / C[idx_y2]
     Sy[idx_ypy] = 2.0 * ay0 / C[idx_ypy]
@@ -1055,6 +1103,20 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
         return Ix, Iy, result, transfer
 
     Sx, Sy = quadratic_invariants(data, state)
+    if state.get("horizontal_slice_only", False):
+        Gnn = state["Gnn"]
+        D = np.eye(state["nonquad_size"], dtype=float) - tnn
+        Ux = tnq @ Sx
+        Lg = np.linalg.cholesky(Gnn)
+        hx, *_ = np.linalg.lstsq(Lg.T @ D, Lg.T @ Ux, rcond=tol)
+        Ix = np.concatenate((Sx, hx))
+        result = {
+            "method": "a_box",
+            "horizontal_slice_only": True,
+            "active_variables": state["active_variables"],
+        }
+        return Ix, None, result, transfer
+
     result = invariant(tnn, tnq, Sx, Sy, state, tol=tol)
     return result[-2], result[-1], result, transfer
 
@@ -1069,7 +1131,11 @@ def invariant_polynomial(lattice, data, state, tol=1e-14, cache=True, **_legacy_
         cache=cache,
     )
     Ix_pol = vector_to_poly(np.asarray(Ix) * state["C"], state["monomial_basis"])
-    Iy_pol = vector_to_poly(np.asarray(Iy) * state["C"], state["monomial_basis"])
+    Iy_pol = (
+        None
+        if Iy is None
+        else vector_to_poly(np.asarray(Iy) * state["C"], state["monomial_basis"])
+    )
     return Ix_pol, Iy_pol, result, transfer
 
 
@@ -1179,6 +1245,18 @@ def plot_invariant_section(
     (frozen_q0, frozen_p0).
     """
     plane = plane.lower()
+    if state.get("horizontal_slice_only", False):
+        if plane in {"y", "both"}:
+            raise ValueError(
+                "A_BOX[2]=0 activates horizontal-only LS mode; Iy/y-plane plots "
+                "are not defined."
+            )
+        if abs(float(frozen_q0)) > 0.0 or abs(float(frozen_p0)) > 0.0:
+            raise ValueError(
+                "Horizontal-only LS mode is defined on y=py=0; use "
+                "frozen_q0=0 and frozen_p0=0."
+            )
+
     if plane == "both":
         return {
             "x": plot_invariant_section(
