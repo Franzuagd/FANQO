@@ -1,14 +1,4 @@
-"""Load and validate FANQO's two user-editable configuration modules.
-
-general_config.py chooses the experiment: polynomial order, Hamiltonian,
-invariant construction, optimizer settings, plots, FMA, and output paths.
-
-lattice_config.py defines the machine: parameters, magnet families, lattice
-order, dependency maps, and chromatic-correction families.
-
-This module checks that those ordinary Python files satisfy the interface
-expected by the numerical core. It performs no accelerator calculation itself.
-"""
+"""Load the small configuration surface used by Ixcononly."""
 
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -20,9 +10,6 @@ _REQUIRED_LATTICE_SETTINGS = (
     "PARAMETERS",
     "define_magnets",
     "CELL_NAMES",
-    "LINEAR_VARIABLES",
-    "CHROMATIC_VARIABLES",
-    "PARAMETER_MAP",
     "CORRECTION_PARAMETER_MAP",
     "ENERGY_PARAMETER",
     "REPETITIONS",
@@ -33,41 +20,49 @@ _REQUIRED_LATTICE_SETTINGS = (
     "TARGET_CHROM_Y",
 )
 
+_REQUIRED_GENERAL_SETTINGS = (
+    "LATTICE_FILE",
+    "ANALYSIS_CELLS",
+    "VARIABLES",
+    "FIELD_SYMBOLS",
+    "HAMILTONIAN",
+    "ORDER",
+    "DELTA_ORDER",
+    "N_PLANES",
+    "A_BOX",
+    "LEAST_SQUARES_TOL",
+    "CORRECT_CHROMATICITY",
+    "TRACKING_COORDS_MM",
+    "TRACKING_STEPS",
+    "TRACKING_TURNS",
+    "TRACKING_NUM_INT_STEPS",
+    "TRACKING_DELTA",
+    "IX_INVARIANCE_NORM_FLOOR_FRACTION",
+    "OUTPUT_DIRECTORY",
+    "SAVE_PLOTS",
+    "SHOW_PLOTS",
+)
+
 
 def resolve_config_path(file_name, *, relative_to=None):
-    """Resolve a Python config path, optionally relative to another file."""
     path = Path(file_name).expanduser()
-
     if not path.suffix:
         path = path.with_suffix(".py")
-
     if not path.is_absolute():
-        if relative_to is None:
-            base = Path.cwd()
-        else:
-            base = Path(relative_to).expanduser().resolve()
-            if base.is_file() or base.suffix:
-                base = base.parent
+        base = Path.cwd() if relative_to is None else Path(relative_to).expanduser().resolve()
+        if base.is_file() or base.suffix:
+            base = base.parent
         path = base / path
-
     return path.resolve()
 
 
 def load_python_file(file_name, *, relative_to=None, module_prefix="user_config", reload=False):
-    """Load a Python configuration file as an isolated module.
-
-    A path-derived module name prevents same-named config files in different
-    experiment folders from colliding. reload=True is important for workflows
-    that rewrite a temporary runtime config between runs.
-    """
     path = resolve_config_path(file_name, relative_to=relative_to)
-
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file was not found: {path}")
 
     digest = hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
     module_name = f"_{module_prefix}_{path.stem}_{digest}"
-
     existing = sys.modules.get(module_name)
     if existing is not None and not reload:
         return existing
@@ -80,58 +75,43 @@ def load_python_file(file_name, *, relative_to=None, module_prefix="user_config"
 
     module = module_from_spec(spec)
     sys.modules[module_name] = module
-
     try:
         spec.loader.exec_module(module)
     except Exception:
         sys.modules.pop(module_name, None)
         raise
-
     return module
 
 
 def validate_lattice_config(lattice_cfg):
-    """Raise a clear error when a selected lattice file is incomplete."""
-    missing = [
-        name for name in _REQUIRED_LATTICE_SETTINGS
-        if not hasattr(lattice_cfg, name)
-    ]
+    missing = [name for name in _REQUIRED_LATTICE_SETTINGS if not hasattr(lattice_cfg, name)]
     if missing:
         source = getattr(lattice_cfg, "__file__", "<unknown>")
-        formatted = "\n    ".join(missing)
         raise AttributeError(
-            f"Invalid lattice configuration '{source}'.\n"
-            f"Missing required setting(s):\n    {formatted}"
+            f"Invalid lattice configuration '{source}'.\nMissing required setting(s):\n    "
+            + "\n    ".join(missing)
         )
-
     if not callable(lattice_cfg.define_magnets):
         raise TypeError("Lattice setting 'define_magnets' must be callable.")
-
     if not isinstance(lattice_cfg.PARAMETERS, dict):
         raise TypeError("Lattice setting 'PARAMETERS' must be a dictionary.")
-
     if not lattice_cfg.CELL_NAMES:
         raise ValueError("Lattice setting 'CELL_NAMES' cannot be empty.")
-
     return lattice_cfg
 
 
 def load_lattice_config(file_name, *, relative_to=None, reload=False):
-    """Load and validate one user-selected lattice Python file."""
-    lattice_cfg = load_python_file(
-        file_name,
-        relative_to=relative_to,
-        module_prefix="lattice",
-        reload=reload,
+    return validate_lattice_config(
+        load_python_file(
+            file_name,
+            relative_to=relative_to,
+            module_prefix="lattice",
+            reload=reload,
+        )
     )
-    return validate_lattice_config(lattice_cfg)
 
 
 def load_selected_lattice(general_cfg, *, reload=False):
-    """Load LATTICE_FILE selected by a general configuration module."""
-    if not hasattr(general_cfg, "LATTICE_FILE"):
-        raise AttributeError("General configuration is missing LATTICE_FILE.")
-
     return load_lattice_config(
         general_cfg.LATTICE_FILE,
         relative_to=general_cfg.__file__,
@@ -140,52 +120,52 @@ def load_selected_lattice(general_cfg, *, reload=False):
 
 
 def analysis_ring_names(general_cfg, lattice_cfg):
-    """Return the lattice names used for nonlinear/invariant analysis.
-
-    ANALYSIS_CELLS is separate from the full physical ring used by tracking.
-    A one-cell polynomial model can therefore coexist with full-ring FMA.
-    """
     cells = int(general_cfg.ANALYSIS_CELLS)
     if cells < 1 or cells != general_cfg.ANALYSIS_CELLS:
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
-
     return list(lattice_cfg.CELL_NAMES) * cells
 
-# Minimum settings needed to build the computational context. Plotting and
-# tracking have additional optional settings handled by the public API.
-_REQUIRED_GENERAL_SETTINGS = (
-    "LATTICE_FILE","ANALYSIS_CELLS","VARY","VARIABLES","FIELD_SYMBOLS",
-    "HAMILTONIAN","ORDER","DELTA_ORDER","N_PLANES","INVARIANT_CONSTRUCTION","A_BOX",
-    "LEAST_SQUARES_TOL","GRADIENT_WEIGHT","INVALID_PENALTY",
-    "CORRECT_CHROMATICITY","CMA_SIGMA","CMA_POPSIZE","PRINT_EVERY",
-    "SCALES","CMA_TIME","POWELL_TIME_FRACTION",
-)
+
 def validate_general_config(general_cfg):
-    """Validate the experiment settings needed by the computational core."""
-    missing = [
-        name for name in _REQUIRED_GENERAL_SETTINGS
-        if not hasattr(general_cfg, name)
-    ]
+    missing = [name for name in _REQUIRED_GENERAL_SETTINGS if not hasattr(general_cfg, name)]
     if missing:
         source = getattr(general_cfg, "__file__", "<unknown>")
         raise AttributeError(
             f"Invalid general configuration '{source}'.\nMissing required setting(s):\n    "
             + "\n    ".join(missing)
         )
+
     if int(general_cfg.ANALYSIS_CELLS) < 1:
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
-    method = str(general_cfg.INVARIANT_CONSTRUCTION).lower()
-    if method not in {"a_box", "eigen"}:
+    if int(general_cfg.ORDER) < 2:
+        raise ValueError("ORDER must be at least 2.")
+    if int(general_cfg.DELTA_ORDER) < 0:
+        raise ValueError("DELTA_ORDER must be nonnegative.")
+
+    box = list(general_cfg.A_BOX)
+    if len(box) != 5:
+        raise ValueError("A_BOX must contain [delta, x, y, px, py].")
+    if any(float(v) <= 0.0 for v in box):
         raise ValueError(
-            "INVARIANT_CONSTRUCTION must be 'a_box' or 'eigen'."
+            "A_BOX entries must be positive on Ixcononly. "
+            "Use method='a_box_y0' for the exact y=py=0 construction."
         )
+
+    if len(general_cfg.TRACKING_COORDS_MM) != 4:
+        raise ValueError("TRACKING_COORDS_MM must be [xmin, xmax, ymin, ymax].")
+    if len(general_cfg.TRACKING_STEPS) != 2:
+        raise ValueError("TRACKING_STEPS must be [nx, ny].")
+    if int(general_cfg.TRACKING_TURNS) < 1:
+        raise ValueError("TRACKING_TURNS must be positive.")
     return general_cfg
+
+
 def load_general_config(file_name="general_config.py", *, relative_to=None, reload=False):
-    """Load the experiment configuration and validate its core settings."""
-    cfg = load_python_file(
-        file_name,
-        relative_to=relative_to,
-        module_prefix="general",
-        reload=reload,
+    return validate_general_config(
+        load_python_file(
+            file_name,
+            relative_to=relative_to,
+            module_prefix="general",
+            reload=reload,
+        )
     )
-    return validate_general_config(cfg)
