@@ -23,6 +23,19 @@ from __future__ import annotations
 
 from pathlib import Path
 import csv
+import sys
+
+# Always prefer the FANQO source from this local checkout:
+#
+# FANQO/
+#   src/fanqo/
+#   user/compare_all.py
+#
+# This prevents an older pip-installed FANQO from being imported by mistake.
+_THIS_FILE = Path(__file__).resolve()
+_LOCAL_SRC = _THIS_FILE.parent.parent / "src"
+if (_LOCAL_SRC / "fanqo").is_dir():
+    sys.path.insert(0, str(_LOCAL_SRC))
 
 import fanqo as fq
 
@@ -66,6 +79,10 @@ def _summary_row(name1, name2, result):
 def main():
     # Load one fixed lattice. Every constructor below uses this same machine.
     fq.load(CONFIG_FILE, force=True)
+
+    print("Using FANQO from:")
+    print(Path(fq.__file__).resolve())
+    print()
 
     print("=" * 88)
     print("IX CONSTRUCTION COMPARISON")
