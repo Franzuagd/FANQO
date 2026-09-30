@@ -107,7 +107,9 @@ def main():
         print(f"plot               : {row['plot']}")
         print(f"pointwise data     : {row['data_csv']}")
 
-    output_root = Path(fq._resolve(fq._cfg().OUTPUT_DIRECTORY))
+    # Every comparison folder lives directly under the configured output root.
+    # Derive that root from the last public result instead of using private API.
+    output_root = Path(result["output_directory"]).parent
     summary_path = output_root / "all_method_comparisons.csv"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
 
