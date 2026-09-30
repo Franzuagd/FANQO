@@ -505,6 +505,13 @@ def prepare_objective_data(
     state = context["state"]
     result = {"state": state, "context": context, **extra_data}
 
+    if state.get("horizontal_slice_only", False):
+        if compute_iy or bool(requirements & {"Iy", "Sy"}):
+            raise ValueError(
+                "A_BOX[2]=0 activates horizontal-only LS mode. "
+                "Iy/Sy are not defined; use COMPUTE_IY=False."
+            )
+
     method = state.get("invariant_construction", "a_box")
     need_quadratic = bool(requirements & {"Sx", "Sy"})
     if method == "a_box":
