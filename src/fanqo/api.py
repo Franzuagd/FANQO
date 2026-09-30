@@ -373,11 +373,11 @@ def _grid(force_y0=False):
     if nx < 1 or ny < 1:
         raise ValueError("TRACKING_STEPS entries must be positive.")
 
-    xs = np.linspace(min(xmin, xmax), max(xmin, xmax), nx + 1)
+    xs = np.linspace(min(xmin, xmax), max(xmin, xmax), nx)
     if force_y0:
         ys = np.array([0.0])
     else:
-        ys = np.linspace(min(ymin, ymax), max(ymin, ymax), ny + 1)
+        ys = np.linspace(min(ymin, ymax), max(ymin, ymax), ny)
     return xs, ys
 
 
@@ -533,6 +533,12 @@ def compare(name1, name2, *, output_directory=None, save=None, show=None):
             score = float(log2 - log1) if valid1 and valid2 else np.nan
 
             if valid1 and valid2:
+                # log10 is strictly increasing: positive score must mean
+                # D1 < D2, i.e. method1 really is the red/better method.
+                if score > 0.0 and not (D1 < D2):
+                    raise AssertionError("Red/blue comparison sign is inconsistent.")
+                if score < 0.0 and not (D2 < D1):
+                    raise AssertionError("Red/blue comparison sign is inconsistent.")
                 if score > 0.0:
                     winner = method1
                 elif score < 0.0:
@@ -623,9 +629,8 @@ def compare(name1, name2, *, output_directory=None, save=None, show=None):
             )
             cbar = fig.colorbar(scatter, ax=ax)
             cbar.set_label(
-                rf"$\log_{{10}}D_{{{method2}}} - "
-                rf"\log_{{10}}D_{{{method1}}}$\n"
-                + f"red = {method1} better, blue = {method2} better"
+                f"log10(D_{method2}) - log10(D_{method1})\n"
+                f"red = {method1} better, blue = {method2} better"
             )
 
         if invalid and not force_y0:
