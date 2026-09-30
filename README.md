@@ -1,259 +1,171 @@
-# FANQO
+# FANQO — Ixcononly
 
-**FANQO — Franzua's Accelerator Nonlinear Quasi-Invariant Optimizer**
+Experimental branch for studying **horizontal nonlinear invariant construction**
+on a fixed accelerator lattice.
 
-Python research package for linear optics, nonlinear polynomial quasi-invariants,
-CMA-ES/Powell optimization, frequency-map analysis (FMA), and full-ring tracking
-of the horizontal invariant `Ix`.
+This branch intentionally removes magnet optimization, objective campaigns,
+automatic `a_box` calibration, CMA-ES, Powell, and optimization reports. Its
+purpose is to answer one question cleanly:
 
-## Repository structure
+> Given the same lattice and the same physical tracked trajectories, which
+> construction produces the better horizontal quasi-invariant `Ix`?
 
-This repository contains the reusable FANQO library and a `user/` starter folder.
-The files under `user/` are templates that users copy to their own working directory
-and edit for their accelerator and run settings.
+## Invariant constructors
 
-```text
-.
-├── pyproject.toml
-├── README.md
-├── .gitignore
-├── src/
-│   └── fanqo/
-│       ├── __init__.py
-│       ├── api.py
-│       ├── a_box.py
-│       ├── config_loader.py
-│       ├── state.py
-│       └── core/
-│           ├── __init__.py
-│           ├── linear.py
-│           ├── nonlinear.py
-│           ├── objective_functions.py
-│           └── optimization.py
-├── tests/
-└── user/
-    ├── general_config.py
-    ├── lattice_config.py
-    └── run.py
-```
+`fq.available_methods()` returns:
 
-The local working directory used by a researcher normally contains files such as:
+### `a_box`
+
+Original full 5-D weighted least-squares continuation of the horizontal
+Courant-Snyder quadratic invariant:
 
 ```text
-my_fanqo_experiment/
-├── general_config.py
-├── lattice_config.py
-└── run.py
+min_h ||(I - T_nn) h - T_nq Sx||_G
 ```
 
-The files in `user/` are examples. Copy them outside the FANQO repository before
-editing them for a real experiment.
+The polynomial basis is scaled using `A_BOX`.
 
-## Install with Anaconda
+### `a_box_y0`
 
-```bash
-conda create -n fanqo python=3.12 -y
-conda activate fanqo
-python -m pip install --upgrade pip
+Exact horizontal-slice version of `a_box`. Before the basis, Gram matrix, or
+Lie algebra is built, FANQO restricts to
+
+```text
+y = py = 0
 ```
 
-From a local clone of this repository:
+and keeps only monomials in
 
-```bash
-python -m pip install -e ".[dev]"
+```text
+(delta, x, px)
 ```
 
-For FMA and Ix tracking with Accelerator Toolbox:
+The least-squares solve is still G-weighted, but G is now the reduced horizontal
+Gram matrix. This is not a tiny-y approximation.
 
-```bash
-python -m pip install -e ".[tracking,dev]"
+### `hybrid`
+
+Uses the same **unscaled physical Cartesian monomial representation** as the
+eigen construction:
+
+```text
+C = 1
+epsilon = 1
 ```
 
-## Basic import
+but does not diagonalize `T-I`. Instead it fixes the Courant-Snyder quadratic
+block and solves
+
+```text
+(I - T_nn) h = T_nq Sx
+```
+
+with ordinary Euclidean least squares:
 
 ```python
-import fanqo
-print(fanqo.__version__)
+np.linalg.lstsq(D, U)
 ```
 
-## Typical local workflow
+No Gram metric `G` and no Cholesky weighting enter this construction.
 
-From a directory containing your own `general_config.py` and
-`lattice_config.py`:
+### `eigen`
+
+Full unscaled physical monomial basis. FANQO diagonalizes `T-I`, selects a
+near-fixed real eigenvector, and normalizes its horizontal quadratic sector.
+
+## Minimal workflow
+
+From `user/`:
 
 ```python
 import fanqo as fq
-from fanqo.core.objective_functions import horizontal_invariant_shape
 
-fq.load("general_config.py")
-fq.status()
+fq.load("general_config.py", force=True)
 
-fq.linear_summary()
-fq.plot_linear()
-fq.write_linear_report()
-
-fq.compute_invariants()
-fq.plot_invariant()
-fq.write_invariant_report()
-
-result = fq.optimize(horizontal_invariant_shape)
+a = fq.construct("a_box")
+b = fq.construct("a_box_y0")
+h = fq.construct("hybrid")
+e = fq.construct("eigen")
 ```
 
-After `optimize()`, the optimized lattice and whichever invariant planes are enabled in `general_config.py` are the active in-memory state.
-
-
-## Invariant construction
-
-FANQO supports two invariant constructors selected in `general_config.py`:
+To inspect physical coefficients:
 
 ```python
-# Weighted least-squares continuation of the Courant-Snyder invariant.
-INVARIANT_CONSTRUCTION = "a_box"
-
-# Reference eigenvector construction: physical monomial coefficients, C=1,
-# M(H)f={H,f}, T=exp(+L M), then diagonalize T-I and select/normalize
-# the near-invariant eigenvector.
-# INVARIANT_CONSTRUCTION = "eigen"
+c = fq.coefficients("hybrid")
 ```
 
-Both methods preserve the same FANQO monomial indexing and return the same
-public `Ix` vector representation. Therefore objective choice is independent:
+To inspect the symbolic polynomial:
 
 ```python
-from fanqo.core.objective_functions import (
-    horizontal_invariant_shape,
-    reference_fluctuation_index,
-)
-
-result = fq.optimize(horizontal_invariant_shape)
-# or:
-# result = fq.optimize(reference_fluctuation_index)
+Ix = fq.polynomial("a_box")
 ```
 
-The four combinations of the two invariant constructors and the two objective
-functions are supported. `A_BOX_MODE="auto"` applies only to the `"a_box"`
-constructor.
+## Paired tracking comparison
 
-## Choosing a_box
-
-The user can keep a fixed normalization box:
+The main research function is:
 
 ```python
-A_BOX_MODE = "fixed"
-A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3])
+result = fq.compare("a_box", "eigen")
 ```
 
-or ask FANQO to calibrate it once before the main magnet optimization:
+The two methods are evaluated on the **same tracked particle trajectories**.
+
+The plotted score is
+
+```text
+score = log10(D_name2) - log10(D_name1)
+```
+
+where `D` is the maximum relative Ix drift per completed ring turn.
+
+Therefore:
+
+- **red** = `name1` has smaller Ix drift;
+- **blue** = `name2` has smaller Ix drift;
+- white = comparable;
+- gray = particle lost / invalid comparison.
+
+For example:
 
 ```python
-A_BOX_MODE = "auto"
+fq.compare("hybrid", "eigen")
 ```
 
-In automatic mode FANQO performs one FMA-like physical tracking grid, keeps the complete survivor trajectories, proposes a seed `a_box` from their phase-space envelope, and runs a short CMA-ES search in `log(a_box)`. Every CMA candidate is scored using the same saved trajectories, so no extra particle tracking is performed. The winning `a_box` is then rebuilt once and remains fixed throughout the full magnet optimization.
+means red = hybrid better and blue = eigen better.
 
-The same calibration can be requested manually at any time:
+If either method is `a_box_y0`, `compare()` automatically restricts the launch
+set to the mathematically valid slice `y0=0`.
 
-```python
-result = fq.optimize_a_box()
-print(result["best_a_box"])
-print(result["best_score"])
+Each comparison writes:
+
+```text
+ix_construction_output/<name1>_vs_<name2>/
+├── comparison.png
+└── comparison.csv
 ```
 
-## FMA and Ix tracking
+## Configuration
 
-With the tracking extra installed:
+`user/general_config.py` contains only:
 
-```python
-fq.compute_invariants()
-diagnostic = fq.run_fma()
-fq.write_tracking_report()
-```
+- lattice selection;
+- Hamiltonian and polynomial order;
+- `A_BOX`;
+- chromatic correction;
+- physical tracking box, grid, turns, and integration steps;
+- output controls.
 
-The invariant may be computed from one or several analysis cells. Tracking is
-performed on an inferred physical 360-degree ring, and Ix drift is measured once
-per completed full-ring turn.
+There are no optimizer settings on this branch.
 
-## Reports
-
-```python
-fq.write_linear_report()
-fq.write_invariant_report()
-fq.write_optimization_report()
-fq.write_tracking_report("start")
-fq.write_tracking_report("end")
-fq.write_full_report()
-```
-
-## Tests
+## Install
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[tracking,dev]"
 pytest -q
 ```
 
-The repository tests check the installed public package interface. Full
-machine-specific numerical smoke tests should be run from the user's local
-working files.
+## Branch purpose
 
-## Install directly from GitHub
-
-After replacing `USER` with the repository owner:
-
-```bash
-python -m pip install "git+https://github.com/USER/fanqo.git"
-```
-
-or, for an exact tagged release:
-
-```bash
-python -m pip install "git+https://github.com/USER/fanqo.git@v0.2.0"
-```
-
-## Plot display and saving
-
-The starter `general_config.py` separates saving figures from displaying them:
-
-```python
-SAVE_PLOTS = True
-SHOW_PLOTS = False
-```
-
-This mode saves all requested figures without opening GUI windows and uses a
-non-interactive Matplotlib backend, which is recommended for optimization, FMA,
-remote sessions, and long runs. Set `SHOW_PLOTS = True` when interactive windows
-are desired.
-
-
-## 48-hour validation campaign
-
-The complete objective/construction matrix can be run from the `user` folder:
-
-```bash
-python master_run_48h.py
-```
-
-The campaign uses the same truncated polynomial space (`m=6, d=1`) for both
-invariant constructions and evaluates nine optimization objectives with each
-construction, for 18 optimization cases total. It runs the original-lattice
-FMA once, calibrates `a_box` once, reloads the original lattice before every
-optimization case, and dynamically shares the remaining 48-hour wall-time
-budget among unfinished cases.
-
-Results are written under:
-
-```text
-user/master_48h_output/
-├── 00_baseline/
-├── 01_a_box_calibration/
-├── 02_constructor_baselines/
-├── runs/
-│   ├── a_box/
-│   └── eigen/
-├── campaign_state.json
-└── campaign_summary.csv
-```
-
-The state file is written after every case. Rerunning the master file skips
-completed cases and continues an interrupted campaign. Delete
-`master_48h_output/campaign_state.json` (or the full output folder) to start a
-new 48-hour campaign from scratch.
+Do not merge optimization experiments into this branch. `Ixcononly` is meant
+to remain a small, reproducible laboratory for mathematical comparisons between
+invariant constructors.
