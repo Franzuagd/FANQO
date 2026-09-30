@@ -234,6 +234,16 @@ def optimize_a_box(
     )
     pool_size = getattr(cfg, "FMA_POOL_SIZE", None)
 
+    if context["state"].get("horizontal_slice_only", False):
+        # The reduced invariant is defined only on y=py=0. Calibration must
+        # therefore use the same invariant submanifold rather than a 2-D x-y
+        # launch grid.
+        coords_mm = list(map(float, coords_mm))
+        coords_mm[2] = 0.0
+        coords_mm[3] = 0.0
+        steps = list(map(int, steps))
+        steps[1] = 1
+
     xs_mm, ys_mm = api._fma_grid(coords_mm, steps)
     launch_pairs = [(float(x), float(y)) for y in ys_mm for x in xs_mm]
 
@@ -273,6 +283,10 @@ def optimize_a_box(
         getattr(cfg, "A_BOX_OPTIMIZE_MASK", [False, True, True, True, True]),
         dtype=bool,
     )
+    if context["state"].get("horizontal_slice_only", False):
+        optimize_mask = optimize_mask.copy()
+        optimize_mask[2] = False  # y is removed from the reduced basis
+        optimize_mask[4] = False  # py is removed from the reduced basis
     seed, survivor_envelope, survivor_count = _surviving_tracking_a_box_seed(
         trajectories,
         tracking_meta,
