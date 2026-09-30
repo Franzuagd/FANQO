@@ -149,18 +149,36 @@ def _build_nonlinear_state(context, a_box):
     )
 
 
+def _validated_a_box_for_state(state, a_box):
+    """Validate/canonicalize an a_box without changing the prepared basis."""
+    a_box = np.asarray(a_box, dtype=float).copy()
+    dim = len(state["idx_to_vec"][0])
+    if a_box.shape != (dim,):
+        raise ValueError(f"a_box must have shape ({dim},).")
+    if not np.all(np.isfinite(a_box)):
+        raise ValueError("Every a_box half-width must be finite.")
+
+    if state.get("horizontal_slice_only", False):
+        if a_box[0] <= 0.0 or a_box[1] <= 0.0 or a_box[3] <= 0.0:
+            raise ValueError(
+                "Horizontal-only LS mode requires positive delta, x, and px half-widths."
+            )
+        # y and py are not coordinates of the reduced basis. Keep the sentinel
+        # explicit so rebuilding the state cannot accidentally return to 5-D.
+        a_box[2] = 0.0
+        a_box[4] = 0.0
+    elif np.any(a_box <= 0.0):
+        raise ValueError("Every a_box half-width must be positive and finite.")
+    return a_box
+
+
 def context_with_a_box(context, a_box):
     """Return an analysis context with the same lattice and a fresh a_box."""
     if context["settings"].get("invariant_construction", "a_box") != "a_box":
         raise ValueError(
             "a_box recalibration is only defined for INVARIANT_CONSTRUCTION='a_box'."
         )
-    a_box = np.asarray(a_box, dtype=float)
-    expected = len(context["settings"]["variables"])
-    if a_box.shape != (expected,):
-        raise ValueError(f"a_box must have shape ({expected},).")
-    if not np.all(np.isfinite(a_box)) or np.any(a_box <= 0.0):
-        raise ValueError("Every a_box half-width must be positive and finite.")
+    a_box = _validated_a_box_for_state(context["state"], a_box)
 
     settings = dict(context["settings"])
     settings["a_box"] = a_box.copy()
@@ -189,12 +207,7 @@ def set_context_a_box(context, a_box):
 
 def _epsilon_for_a_box(state, a_box):
     """Recompute diagonal monomial scaling for the same truncated basis."""
-    a_box = np.asarray(a_box, dtype=float)
-    dim = len(state["idx_to_vec"][0])
-    if a_box.shape != (dim,):
-        raise ValueError(f"a_box must have shape ({dim},).")
-    if not np.all(np.isfinite(a_box)) or np.any(a_box <= 0.0):
-        raise ValueError("Every a_box half-width must be positive and finite.")
+    a_box = _validated_a_box_for_state(state, a_box)
 
     epsilon = np.zeros(len(state["idx_to_vec"]), dtype=float)
     for i, powers in state["idx_to_vec"].items():
@@ -225,8 +238,9 @@ def rescaled_state_for_a_box(reference_state, data, a_box):
 
     state["epsilon"] = epsilon
     state["C"] = epsilon * math.sqrt(arg)
-    state["a_box"] = np.asarray(a_box, dtype=float).copy()
-    state["coordinate_scale"] = np.asarray(a_box, dtype=float).copy()
+    canonical_a_box = _validated_a_box_for_state(reference_state, a_box)
+    state["a_box"] = canonical_a_box.copy()
+    state["coordinate_scale"] = canonical_a_box.copy()
     state["linear_cs0"] = cs0.copy()
     state["D_x"] = nl.build_derivative_matrix(state, 1)
     state["D_y"] = nl.build_derivative_matrix(state, 2)
@@ -725,6 +739,11 @@ def plot_slices(details, state, folder, settings):
     results = {"folder": str(folder), "Ix": {}, "Iy": {}}
     Ix = details.get("Ix")
     Iy = details.get("Iy")
+    if state.get("horizontal_slice_only", False):
+        settings = dict(settings)
+        settings["y_values"] = (0.0,)
+        settings["frozen_momentum"] = 0.0
+        Iy = None
 
     if Ix is not None:
         for delta0 in settings["delta_values"]:
