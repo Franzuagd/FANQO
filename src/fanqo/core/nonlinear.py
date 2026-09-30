@@ -786,18 +786,54 @@ def initialize_nonlinear_for_method(
     n=2,
     invariant_construction="a_box",
 ):
-    """Dispatch to one of FANQO's invariant representations."""
+    """Build the polynomial representation used by one Ix constructor.
+
+    Methods
+    -------
+    a_box
+        Full 5-D scaled monomial basis and G-weighted least squares.
+    a_box_y0
+        Exact invariant submanifold y=py=0. The basis itself is reduced to
+        (delta, x, px) before G and the Lie matrices are built.
+    hybrid
+        Same unscaled physical monomial representation used by eigen, but Ix is
+        obtained later with ordinary Euclidean least squares (no G weighting).
+    eigen
+        Full unscaled physical monomial representation and near-fixed
+        eigenvector construction.
+    """
     method = str(invariant_construction).lower()
+
     if method == "a_box":
-        return initialize_nonlinear(
+        state = initialize_nonlinear(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
-    if method == "eigen":
-        return initialize_nonlinear_eigen(
+        state["invariant_construction"] = "a_box"
+        return state
+
+    if method == "a_box_y0":
+        reduced_box = np.asarray(a_box, dtype=float).copy()
+        if reduced_box.shape != (5,):
+            raise ValueError("a_box_y0 expects A_BOX=[delta,x,y,px,py].")
+        reduced_box[2] = 0.0
+        reduced_box[4] = 0.0
+        state = initialize_nonlinear(
+            data, m, d, hamiltonian, reduced_box, variables, field_symbols, n=n
+        )
+        state["invariant_construction"] = "a_box_y0"
+        state["horizontal_slice_only"] = True
+        state["active_variables"] = ("delta", "x", "px")
+        return state
+
+    if method in {"eigen", "hybrid"}:
+        state = initialize_nonlinear_eigen(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
+        state["invariant_construction"] = method
+        return state
+
     raise ValueError(
-        "invariant_construction must be 'a_box' or 'eigen'."
+        "method must be one of: 'a_box', 'a_box_y0', 'hybrid', 'eigen'."
     )
 
 
@@ -1022,6 +1058,81 @@ def eigen_invariant(
         "reference_candidate_count": int(len(candidates)),
         "eigen_cutoff": float(cutoff),
     }
+
+
+def least_squares_ix(tnn, tnq, Sx, state, tol=1e-14, *, weighted=True):
+    """Construct Ix with a fixed Courant-Snyder quadratic block.
+
+    weighted=True is the original a_box construction:
+
+        min_h ||(I-T_nn)h - T_nq Sx||_{G_nn}.
+
+    weighted=False is the hybrid construction in the unscaled physical
+    monomial basis used by eigen:
+
+        min_h ||(I-T_nn)h - T_nq Sx||_2.
+
+    The hybrid intentionally does not use G or a Cholesky factor.
+    """
+    D = np.eye(state["nonquad_size"], dtype=float) - np.asarray(tnn, dtype=float)
+    U = np.asarray(tnq, dtype=float) @ np.asarray(Sx, dtype=float)
+
+    if weighted:
+        Gnn = np.asarray(state["Gnn"], dtype=float)
+        Lg = np.linalg.cholesky(Gnn)
+        h, *_ = np.linalg.lstsq(Lg.T @ D, Lg.T @ U, rcond=tol)
+    else:
+        h, *_ = np.linalg.lstsq(D, U, rcond=tol)
+
+    residual = U - D @ h
+    details = {
+        "weighted": bool(weighted),
+        "euclidean_residual": float(np.linalg.norm(residual)),
+        "euclidean_rhs_norm": float(np.linalg.norm(U)),
+    }
+    if weighted:
+        Gnn = np.asarray(state["Gnn"], dtype=float)
+        details["G_residual"] = float(
+            np.sqrt(max(residual @ Gnn @ residual, 0.0))
+        )
+        details["G_rhs_norm"] = float(
+            np.sqrt(max(U @ Gnn @ U, 0.0))
+        )
+
+    return np.concatenate((np.asarray(Sx, dtype=float), h)), details
+
+
+def construct_ix(lattice, data, state, tol=1e-14, cache=True):
+    """Construct the horizontal invariant with the method stored in state."""
+    transfer, tnn, tnq = nonlinear_transfer(
+        lattice, state, tol=tol, cache=cache
+    )
+    method = str(state.get("invariant_construction", "a_box")).lower()
+
+    if method == "eigen":
+        Ix, details = eigen_invariant(transfer, state, plane="x")
+        details = {"method": "eigen", **details}
+        return Ix, details, transfer
+
+    Sx, _ = quadratic_invariants(data, state)
+    if method in {"a_box", "a_box_y0"}:
+        Ix, details = least_squares_ix(
+            tnn, tnq, Sx, state, tol=tol, weighted=True
+        )
+    elif method == "hybrid":
+        Ix, details = least_squares_ix(
+            tnn, tnq, Sx, state, tol=tol, weighted=False
+        )
+    else:
+        raise ValueError(f"Unknown invariant construction: {method!r}")
+
+    details.update({
+        "method": method,
+        "horizontal_slice_only": bool(
+            state.get("horizontal_slice_only", False)
+        ),
+    })
+    return Ix, details, transfer
 
 
 def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
