@@ -1,56 +1,31 @@
-"""User-editable experiment configuration for FANQO.
+"""Minimal configuration for the Ixcononly research branch.
 
-Use this file for choices that belong to an experiment rather than to the
-accelerator definition itself: polynomial truncation, invariant construction,
-normalization, objective settings, optimizer budget, plotting, FMA, and output
-locations.
+This branch studies invariant construction only. There are no magnet-optimizer,
+objective-function, Powell/CMA, or automatic-a_box settings.
 
-The actual machine (magnets, cell order, parameter dependencies, chromatic
-families) belongs in lattice_config.py.
-
-Coordinate convention used by the nonlinear polynomial code:
+Polynomial coordinate convention:
     [delta, x, y, px, py]
 """
+
 from pathlib import Path
 import numpy as np
 import sympy as sp
 
-# 1. LATTICE TO USE
-# The lattice file can be renamed or placed in a subfolder.
-# Examples:
-# LATTICE_FILE = "lattice_config.py"
-# LATTICE_FILE = "lattices/my_storage_ring.py"
+
+# Fixed accelerator used by every constructor.
 LATTICE_FILE = "lattice_config.py"
-
-# Number of configured cells used to build the nonlinear/invariant map.
-# This is NOT the physical full-ring cell count used by FMA / Ix tracking.
 ANALYSIS_CELLS = 1
+CORRECT_CHROMATICITY = True
 
-# 2. VARIABLES TO OPTIMIZE
-# These are parameter names from lattice_config.PARAMETERS. CMA/Powell changes
-# only these entries; chromatic correction may additionally update its two
-# dependent correction-family strengths.
-VARY = [
-    "kse1", "kfd2", "kfd3", "ks1", "ks2", "ksd3",
-    "ks1s", "ks2s", "ko1", "ko2", "ko3",
-]
 
-# 3. SYMBOLIC PHASE-SPACE VARIABLES
-# Keep this order unless nonlinear.py is generalized beyond the current model:
-#     [delta, x, y, px, py]
+# Symbolic phase-space variables.
 delta, x, y, px, py = sp.symbols("delta x y px py")
 VARIABLES = [delta, x, y, px, py]
 
-# 4. SYMBOLIC ELEMENT / HAMILTONIAN COEFFICIENTS
-# b1 = curvature
-# b2 = quadrupole strength K
-# b3 = sextupole strength S
-# b4 = nonlinear multipole strength O
-# b5 = reserved fifth coefficient (currently zero for every element)
+# Element/Hamiltonian coefficients.
 b1, b2, b3, b4, b5 = sp.symbols("b1 b2 b3 b4 b5")
 FIELD_SYMBOLS = [b1, b2, b3, b4, b5]
 
-# 5. HAMILTONIAN
 HAMILTONIAN = (
     sp.Rational(1, 2) * (px**2 + py**2) * (1 - delta + delta**2)
     - b1 * x * delta
@@ -60,227 +35,37 @@ HAMILTONIAN = (
     + sp.Rational(1, 4) * b4 * (x**4 - 6 * x**2 * y**2 + y**4)
 )
 
-# 6. POLYNOMIAL SPACE
-# m = maximum transverse degree
-# d = maximum delta degree
+
+# Polynomial truncation.
 ORDER = 8
 DELTA_ORDER = 1
 N_PLANES = 2
 
-# How Ix/Iy are constructed. Objective choice is independent of this setting:
-# "a_box" -> fix the Courant-Snyder quadratic block and solve the nonlinear
-#            continuation by weighted least squares.
-# "eigen" -> diagonalize T-I and select/normalize a near-fixed eigenvector.
-INVARIANT_CONSTRUCTION = "a_box"
+# Used by the weighted a_box construction.
+# a_box_y0 automatically replaces y and py by exactly zero and rebuilds a
+# reduced (delta,x,px) basis. Keep this normal 5-D box positive.
+A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
 
-# 7. NORMALIZATION / PHYSICAL BOX
-# "fixed": use A_BOX exactly as written below.
-# "auto" : before the main magnet optimization, run optimize_a_box() once.
-# A_BOX_MODE is used only when INVARIANT_CONSTRUCTION = "a_box".
-A_BOX_MODE = "fixed"
-
-# Physical half-widths in nonlinear variable order [delta, x, y, px, py].
-A_BOX = np.array(
-    [0.01, 10e-3, 8.0e-3, 1.0e-3, 0.8e-3],
-    dtype=float,
-)
-
-# 8. INVARIANTS TO COMPUTE / KEEP ACTIVE
-# Computing only the invariant planes that are actually needed avoids an
-# unnecessary second least-squares solve during Ix-only work.
-COMPUTE_IX = True
-COMPUTE_IY = False
-
-# 9. NONLINEAR NUMERICAL SETTINGS
-# rcond used by the weighted least-squares invariant solve.
 LEAST_SQUARES_TOL = 1.0e-14
 
-# Kept for compatibility with older experiment files. Current zero-length
-# multipoles use O directly as an integrated kick and do not invent a length.
-THIN_MULTIPOLE_LENGTH = 1.0e-8
 
-# Reuse nonlinear maps of physically identical/unchanged magnets.
-CACHE_REPEATED_MAGNET_MAPS = True
+# Paired physical tracking used by compare(name1, name2).
+# Coordinates are [xmin, xmax, ymin, ymax] in millimetres.
+TRACKING_COORDS_MM = [-15.0, 15.0, -15.0, 15.0]
+TRACKING_STEPS = [121, 121]
+TRACKING_TURNS = 512
+TRACKING_DELTA = 0.0
+TRACKING_NUM_INT_STEPS = 10
 
-# Optional structural check that the quadratic<-nonlinear transfer block is
-# negligible. Normally false because checking it for every element is costly.
-CHECK_ELEMENT_UPPER_RIGHT = False
+# None -> infer the number of cells required for 360 degrees.
+TRACKING_PHYSICAL_RING_CELLS = None
+TRACKING_POOL_SIZE = None
 
-# 10. OBJECTIVE
-# Parameters for horizontal_invariant_shape().
-GRADIENT_WEIGHT = 0.10
+# Relative-Ix denominator floor.
+IX_INVARIANCE_NORM_FLOOR_FRACTION = 1.0e-12
 
-# Parameters for reference_fluctuation_index().
-# These reproduce the active sampling choices in the reference implementation.
-REFERENCE_OBJECTIVE_X_RANGE = 2.5e-3
-REFERENCE_OBJECTIVE_X_POINTS = 21
-REFERENCE_OBJECTIVE_Y_RANGE = 0.7e-3
-REFERENCE_OBJECTIVE_Y_POINTS = 11
-REFERENCE_OBJECTIVE_DELTA_VALUES = (-3.4e-2,)
-REFERENCE_OBJECTIVE_MOMENTUM_WEIGHT = 0.7
 
-INVALID_PENALTY = 1.0e30
-
-# 11. CHROMATIC CORRECTION
-# When True, the two families named in lattice_config.py are solved to the
-# requested target chromaticities before nonlinear invariants/objectives.
-CORRECT_CHROMATICITY = True
-
-# 12. OPTIMIZER SETTINGS
-# CMA_SIGMA is the initial step size in normalized optimizer coordinates.
-CMA_SIGMA = 0.50
-
-# Population size per CMA generation. Small values are useful for debugging;
-# increase only after timing one objective evaluation.
-CMA_POPSIZE = 3
-
-# Print every N objective evaluations/generations as used by the optimizer.
-PRINT_EVERY = 1
-
-# If a varied parameter starts at zero, |v0| cannot define its CMA scale.
-# SCALES provides the fallback physical scale for those zero-valued variables.
-SCALES = {name: 100.0 for name in VARY}
-
-# CMA wall-clock budget in seconds. Powell receives the fraction below.
-CMA_TIME = 60.0
-POWELL_TIME_FRACTION = 0.25
-
-# 13. NONLINEAR / START-END PLOT SETTINGS
+# Output.
 SAVE_PLOTS = True
 SHOW_PLOTS = False
-
-PLOT_PLANE = "both"
-PLOT_LEVELS = 60
-PLOT_GRID_POINTS = 350
-PLOT_RMIN = 0.06
-PLOT_RMAX = 0.95
-PLOT_DELTA = 0.0
-PLOT_FOLDER = "nonlinear_plots"
-
-# Physical plotting aperture.
-PLOT_X_MAX = 5.0e-3
-PLOT_PX_MAX = 1.0e-3
-PLOT_Y_MAX = 3.0e-3
-PLOT_PY_MAX = 1.0e-3
-
-# Plot invariant slices at optimization start/end.
-PLOT_START_END_SLICES = True
-
-# Ix is plotted in (x,px) while y is frozen at each value below.
-SLICE_Y_VALUES = (0.0, 0.1 * PLOT_Y_MAX, 0.2 * PLOT_Y_MAX)
-
-# Iy is plotted in (y,py) while x is frozen at each value below.
-SLICE_X_VALUES = (0.0,)
-
-# Repeat the slices at these momentum offsets delta.
-SLICE_DELTA_VALUES = (0.0, 0.5 * float(A_BOX[0]), float(A_BOX[0]))
-
-# Momentum conjugate to the frozen transverse coordinate:
-#   Ix (x,px) slice -> py = SLICE_FROZEN_MOMENTUM
-#   Iy (y,py) slice -> px = SLICE_FROZEN_MOMENTUM
-SLICE_FROZEN_MOMENTUM = 0.0
-
-# 14. FREQUENCY MAP ANALYSIS + IX TRACKING
-RUN_FMA_START_END = True
-
-FMA_CASE_LABEL = "current_lattice"
-
-# Frequency-map window. Accelerator Toolbox expects these coordinates in mm:
-# [xmin, xmax, ymin, ymax].
-FMA_COORDS_MM = [-15.0, 15.0, -15.0, 15.0]
-
-# Number of initial conditions in x and y.
-# Start small for testing; increase to [60, 60] or [100, 100] for final maps.
-FMA_STEPS = [121, 121]
-
-# PyAT tracks 2*TURNS internally: one block for the first tune estimate and
-# one block for the second tune estimate.
-FMA_TURNS = 256
-
-# Number of integration slices used by PyAT for thick multipoles.
-FMA_NUM_INT_STEPS = 10
-
-# Use the same chromatic correction as the native lattice before conversion.
-FMA_CORRECT_CHROMATICITY = CORRECT_CHROMATICITY
-
-# FMA / Ix tracking should represent one physical turn of the machine.
-# If None, infer the number of identical cells needed for 360 degrees of net bend.
-FMA_PHYSICAL_RING_CELLS = None
-
-# Optional common momentum offset. 0.0 means on-momentum FMA.
-FMA_DELTA = 0.0
-
-# Parallel tracking. None lets PyAT choose its default process count.
-FMA_POOL_SIZE = None
-FMA_SAVE_PLOT = SAVE_PLOTS
-FMA_SHOW_PLOT = SHOW_PLOTS
-
-# Ix invariance tracking uses the same launch grid and total tracking length as
-# the FMA diagnostic (2 * FMA_TURNS complete physical-ring turns).
-IX_INVARIANCE_NORM_FLOOR_FRACTION = 1.0e-12
-IX_INVARIANCE_LOG_MIN = -14.0
-IX_INVARIANCE_LOG_MAX = 0.0
-
-# 15. INVARIANT CONTOURS VS. PHYSICAL POINCARE TRACKING
-# Initial coordinate offsets relative to the closed orbit, in metres.
-POINCARE_X_VALUES = [2.0e-3, 4.0e-3, 6.0e-3, 8.0e-3]
-POINCARE_Y_VALUES = []
-
-POINCARE_DELTA = 0.0
-POINCARE_TURNS = 256
-POINCARE_GRID_POINTS = 350
-
-# The contour comparison is a 2-D slice. These tolerances flag trajectories
-# that leak significantly into the other transverse plane.
-POINCARE_LEAKAGE_POSITION_TOL = 1.0e-5
-POINCARE_LEAKAGE_MOMENTUM_TOL = 1.0e-5
-POINCARE_OUTPUT_DIRECTORY = Path("optimization_output") / "poincare"
-
-
-# 16. ONE-TIME A_BOX CALIBRATION
-# Used only when A_BOX_MODE = "auto", or whenever the user explicitly calls
-# fq.optimize_a_box(). The physical tracking is done once; CMA then reuses the
-# same saved survivor trajectories.
-
-# FMA-like launch window in millimetres: [xmin, xmax, ymin, ymax].
-A_BOX_TRACKING_COORDS_MM = [
-    -1000.0 * float(A_BOX[1]),
-     1000.0 * float(A_BOX[1]),
-    -1000.0 * float(A_BOX[2]),
-     1000.0 * float(A_BOX[2]),
-]
-
-# _fma_grid creates nx+1 by ny+1 launch points.
-A_BOX_TRACKING_STEPS = [10, 10]
-A_BOX_TRACKING_TURNS = 128
-A_BOX_TRACKING_DELTA = 0.0
-
-# Build the initial proposed box from complete survivors only.
-# The 98th percentile avoids making one numerical outlier define the box.
-A_BOX_SEED_QUANTILE = 0.98
-A_BOX_SEED_MARGIN = 1.15
-A_BOX_SEED_MIN_FRACTION = 0.20
-
-# [delta, x, y, px, py]
-# delta stays fixed by default because a single on-momentum tracking set cannot
-# identify an optimal delta half-width.
-A_BOX_OPTIMIZE_MASK = [False, True, True, True, True]
-
-# Short CMA-ES refinement around the survivor-derived seed.
-# Search is performed in log(a_box), so all half-widths remain positive.
-A_BOX_CMA_SIGMA = 0.25
-A_BOX_CMA_POPSIZE = 6
-A_BOX_CMA_MAX_EVALS = 30
-A_BOX_CMA_FACTOR_BOUNDS = (0.5, 2.0)
-
-# Objective floor for relative Ix conservation along the saved trajectories.
-A_BOX_INVARIANCE_FLOOR_FRACTION = 1.0e-8
-A_BOX_OUTPUT_DIRECTORY = Path("optimization_output") / "a_box"
-
-
-# 17. OUTPUTS
-OUTPUT_ROOT = Path("optimization_output")
-REPORT_FILE = OUTPUT_ROOT / "optimization_report.txt"
-FINAL_LATTICE_FILE = OUTPUT_ROOT / "final_lattice.json"
-PLOT_ROOT = OUTPUT_ROOT / "slices"
-FMA_OUTPUT_DIRECTORY = OUTPUT_ROOT / "FMA"
+OUTPUT_DIRECTORY = Path("ix_construction_output")
