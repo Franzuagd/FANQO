@@ -22,6 +22,7 @@ Any comparison containing a_box_y0 automatically runs only on y0=0.
 from __future__ import annotations
 
 from pathlib import Path
+from itertools import combinations
 import csv
 import sys
 
@@ -42,23 +43,21 @@ import fanqo as fq
 
 CONFIG_FILE = "general_config.py"
 
-# Keep the ordering explicit because it also defines the plot color convention.
-# The first four constructors are full 5-D methods.  graded_ls is the new
-# A_BOX-independent block-by-block construction with Sx fixed exactly.
-FULL_5D_COMPARISONS = [
-    ("a_box", "hybrid"),
-    ("a_box", "eigen"),
-    ("a_box", "graded_ls"),
-    ("hybrid", "eigen"),
-    ("hybrid", "graded_ls"),
-    ("eigen", "graded_ls"),
-]
+# Complete pairwise matrix for the full 5-D constructors.  Ordering also
+# defines the red/name1 and blue/name2 convention in each plot.
+FULL_5D_METHODS = (
+    "a_box",
+    "hybrid",
+    "eigen",
+    "graded_ls",
+    "cesaro",
+    "abel",
+)
+FULL_5D_COMPARISONS = list(combinations(FULL_5D_METHODS, 2))
 
 Y0_COMPARISONS = [
-    ("a_box_y0", "a_box"),
-    ("a_box_y0", "hybrid"),
-    ("a_box_y0", "eigen"),
-    ("a_box_y0", "graded_ls"),
+    ("a_box_y0", method)
+    for method in FULL_5D_METHODS
 ]
 
 
