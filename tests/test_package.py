@@ -21,9 +21,10 @@ def test_public_api_is_invariant_only():
 
     assert fanqo.available_methods() == (
         "a_box",
-        "a_box_y0",
         "hybrid",
         "eigen",
+        "graded_ls",
+        "a_box_y0",
     )
 
     assert not hasattr(fanqo, "optimize")
