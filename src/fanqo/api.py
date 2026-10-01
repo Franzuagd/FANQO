@@ -26,7 +26,7 @@ from .core import nonlinear as nl
 from .plotting import get_pyplot
 
 
-METHODS = ("a_box", "hybrid", "eigen", "graded_ls", "a_box_y0")
+METHODS = ("a_box", "hybrid", "eigen", "graded_ls", "cesaro", "abel", "a_box_y0")
 _ALIASES = {
     "ls": "a_box",
     "weighted_ls": "a_box",
@@ -35,6 +35,8 @@ _ALIASES = {
     "cartesian_ls": "hybrid",
     "graded": "graded_ls",
     "block_ls": "graded_ls",
+    "mean_ergodic": "cesaro",
+    "abel_average": "abel",
 }
 
 
@@ -128,7 +130,7 @@ def status():
 def _state_for_method(method):
     cfg = _cfg()
     context = _require_context()
-    return nl.initialize_nonlinear_for_method(
+    state = nl.initialize_nonlinear_for_method(
         context["data"],
         m=int(cfg.ORDER),
         d=int(cfg.DELTA_ORDER),
@@ -139,6 +141,22 @@ def _state_for_method(method):
         n=int(cfg.N_PLANES),
         invariant_construction=method,
     )
+
+    # Optional controls for the averaging constructors.  getattr keeps older
+    # user configs valid.
+    if method == "cesaro":
+        terms = int(getattr(cfg, "CESARO_TERMS", 64))
+        if terms < 1:
+            raise ValueError("CESARO_TERMS must be a positive integer.")
+        state["cesaro_terms"] = terms
+
+    if method == "abel":
+        rho = float(getattr(cfg, "ABEL_RHO", 0.98))
+        if not 0.0 < rho < 1.0:
+            raise ValueError("ABEL_RHO must satisfy 0 < ABEL_RHO < 1.")
+        state["abel_rho"] = rho
+
+    return state
 
 
 def construct(method="a_box", *, force=False):
