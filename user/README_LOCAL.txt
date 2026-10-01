@@ -11,11 +11,13 @@ Public invariant methods:
     hybrid
     eigen
     graded_ls
+    cesaro
+    abel
     a_box_y0
 
-The first four are full 5-D constructors. graded_ls fixes Sx exactly and solves
-the nonlinear correction degree by degree in Courant-Snyder normalized
-coordinates with the Fischer norm. It does not use A_BOX.
+a_box, hybrid, eigen, graded_ls, cesaro, and abel are full 5-D constructors.
+graded_ls, cesaro, and abel are A_BOX-independent and keep the Sx interpretation;
+cesaro and abel obtain the nonlinear correction by map averaging.
 
 Main comparison:
     fq.compare("name1", "name2")
