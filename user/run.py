@@ -17,6 +17,10 @@ def main():
     # Full 5-D comparisons:
     fq.compare("a_box", "eigen")
     fq.compare("graded_ls", "eigen")
+    fq.compare("cesaro", "eigen")
+    fq.compare("abel", "eigen")
+    fq.compare("graded_ls", "cesaro")
+    fq.compare("graded_ls", "abel")
     fq.compare("a_box", "graded_ls")
     fq.compare("hybrid", "graded_ls")
 
