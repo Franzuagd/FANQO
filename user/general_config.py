@@ -46,7 +46,7 @@ N_PLANES = 2
 # reduced (delta,x,px) basis. Keep this normal 5-D box positive.
 A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
 
-LEAST_SQUARES_TOL = 1.0e-14
+LEAST_SQUARES_TOL = 1.0e-16
 
 
 # Paired physical tracking used by compare(name1, name2).
