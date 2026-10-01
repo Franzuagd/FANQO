@@ -802,9 +802,14 @@ def initialize_nonlinear_for_method(
         Full unscaled physical monomial representation and near-fixed
         eigenvector construction.
     graded_ls
-        A_BOX-independent block-by-block continuation of Sx. The invariant is
-        solved recursively by total polynomial degree in Courant-Snyder
-        normalized coordinates using the Fischer coefficient norm.
+        A_BOX-independent block-by-block continuation of Sx in the bi-graded
+        Courant-Snyder/Fischer representation.
+    cesaro
+        A_BOX-independent mean-ergodic average of repeated polynomial-map
+        action on the exact Courant-Snyder seed Sx.
+    abel
+        A_BOX-independent Abel/resolvent average anchored to the exact Sx
+        quadratic block.
     """
     method = str(invariant_construction).lower()
 
@@ -829,7 +834,7 @@ def initialize_nonlinear_for_method(
         state["active_variables"] = ("delta", "x", "px")
         return state
 
-    if method in {"eigen", "hybrid", "graded_ls"}:
+    if method in {"eigen", "hybrid", "graded_ls", "cesaro", "abel"}:
         # These methods all use the same unscaled physical monomial transfer.
         # load_eigen() internally constructs that representation with unit
         # scaling, so the numerical value of A_BOX does not enter their map.
@@ -837,12 +842,14 @@ def initialize_nonlinear_for_method(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
         state["invariant_construction"] = method
-        state["a_box_independent"] = method in {"hybrid", "eigen", "graded_ls"}
+        state["a_box_independent"] = method in {
+            "hybrid", "eigen", "graded_ls", "cesaro", "abel"
+        }
         return state
 
     raise ValueError(
         "method must be one of: 'a_box', 'a_box_y0', 'hybrid', 'eigen', "
-        "'graded_ls'."
+        "'graded_ls', 'cesaro', 'abel'."
     )
 
 
@@ -1332,6 +1339,144 @@ def graded_least_squares_ix(transfer, data, state, tol=1e-14):
     }
 
 
+
+def cesaro_invariant(tnn, tnq, Sx, state, terms=64):
+    """Mean-ergodic average of the map orbit of the Courant-Snyder seed.
+
+    With c_0 = (Sx, 0), define
+
+        c_N = (1/N) sum_(k=0)^(N-1) T^k c_0.
+
+    Because the polynomial transfer is block lower triangular and Sx is fixed
+    by the quadratic linear dynamics, only the nonlinear block must be
+    iterated:
+
+        h_(k+1) = T_nq Sx + T_nn h_k,   h_0 = 0.
+
+    The returned invariant is exactly (Sx, mean_k h_k), so the physically
+    important Courant-Snyder quadratic part is never altered numerically.
+    """
+    terms = int(terms)
+    if terms < 1:
+        raise ValueError("Cesaro averaging requires terms >= 1.")
+
+    tnn = np.asarray(tnn, dtype=float)
+    tnq = np.asarray(tnq, dtype=float)
+    Sx = np.asarray(Sx, dtype=float)
+    n = int(state["nonquad_size"])
+    if tnn.shape != (n, n):
+        raise ValueError("T_nn shape does not match the nonlinear basis.")
+    if tnq.shape != (n, len(Sx)):
+        raise ValueError("T_nq shape does not match the quadratic block.")
+
+    forcing = tnq @ Sx
+    h = np.zeros(n, dtype=float)
+    h_sum = np.zeros(n, dtype=float)
+
+    for _ in range(terms):
+        h_sum += h
+        h = forcing + tnn @ h
+        if not np.all(np.isfinite(h)):
+            raise FloatingPointError(
+                "Cesaro map iterates became non-finite before averaging finished."
+            )
+
+    h_mean = h_sum / float(terms)
+    residual = forcing + tnn @ h_mean - h_mean
+
+    # Mean-ergodic identity:
+    #   T c_N - c_N = (T^N c_0 - c_0)/N.
+    endpoint_residual = h / float(terms)
+
+    return np.concatenate((Sx, h_mean)), {
+        "method": "cesaro",
+        "a_box_independent": True,
+        "fixed_quadratic": "Sx",
+        "terms": terms,
+        "nonlinear_residual": float(np.linalg.norm(residual)),
+        "endpoint_identity_residual": float(np.linalg.norm(endpoint_residual)),
+        "residual_identity_error": float(
+            np.linalg.norm(residual - endpoint_residual)
+        ),
+    }
+
+
+def abel_invariant(tnn, tnq, Sx, state, rho=0.98, tol=1e-14):
+    """Abel/resolvent average of the map orbit of the Courant-Snyder seed.
+
+    The Abel average is
+
+        c_rho = (1-rho) sum_(k>=0) rho^k T^k c_0
+              = (1-rho) (I-rho T)^(-1) c_0,
+
+    with c_0=(Sx,0) and 0<rho<1.
+
+    Holding the quadratic block exactly equal to Sx reduces the construction to
+
+        (I-rho T_nn) h = rho T_nq Sx.
+
+    This is the exact nonlinear block of the Abel average and avoids changing
+    the Courant-Snyder part through finite-precision full-matrix solves.
+    """
+    rho = float(rho)
+    if not 0.0 < rho < 1.0:
+        raise ValueError("Abel averaging requires 0 < rho < 1.")
+
+    tnn = np.asarray(tnn, dtype=float)
+    tnq = np.asarray(tnq, dtype=float)
+    Sx = np.asarray(Sx, dtype=float)
+    n = int(state["nonquad_size"])
+    if tnn.shape != (n, n):
+        raise ValueError("T_nn shape does not match the nonlinear basis.")
+    if tnq.shape != (n, len(Sx)):
+        raise ValueError("T_nq shape does not match the quadratic block.")
+
+    forcing = tnq @ Sx
+    A = np.eye(n, dtype=float) - rho * tnn
+    b = rho * forcing
+
+    solver = "solve"
+    try:
+        h = np.linalg.solve(A, b)
+        rank = n
+        singular_values = np.array([], dtype=float)
+    except np.linalg.LinAlgError:
+        solver = "lstsq"
+        h, _, rank, singular_values = np.linalg.lstsq(A, b, rcond=tol)
+
+    if not np.all(np.isfinite(h)):
+        raise FloatingPointError("Abel invariant contains non-finite coefficients.")
+
+    resolvent_residual = A @ h - b
+    invariance_residual = forcing + tnn @ h - h
+
+    # From h-rho(T_nn h + forcing)=0:
+    #   T c_rho - c_rho = ((1-rho)/rho) (c_rho-c_0)
+    # on the nonlinear block.
+    predicted = ((1.0 - rho) / rho) * h
+
+    details = {
+        "method": "abel",
+        "a_box_independent": True,
+        "fixed_quadratic": "Sx",
+        "rho": rho,
+        "solver": solver,
+        "rank": int(rank),
+        "resolvent_residual": float(np.linalg.norm(resolvent_residual)),
+        "nonlinear_residual": float(np.linalg.norm(invariance_residual)),
+        "residual_identity_error": float(
+            np.linalg.norm(invariance_residual - predicted)
+        ),
+    }
+    if singular_values.size:
+        details["min_relative_singular"] = (
+            float(singular_values[-1] / singular_values[0])
+            if singular_values[0] > 0.0 else float("nan")
+        )
+
+    return np.concatenate((Sx, h)), details
+
+
 def construct_ix(lattice, data, state, tol=1e-14, cache=True):
     """Construct the horizontal invariant with the method stored in state."""
     transfer, tnn, tnq = nonlinear_transfer(
@@ -1351,6 +1496,21 @@ def construct_ix(lattice, data, state, tol=1e-14, cache=True):
         return Ix, details, transfer
 
     Sx, _ = quadratic_invariants(data, state)
+
+    if method == "cesaro":
+        Ix, details = cesaro_invariant(
+            tnn, tnq, Sx, state,
+            terms=int(state.get("cesaro_terms", 64)),
+        )
+        return Ix, details, transfer
+
+    if method == "abel":
+        Ix, details = abel_invariant(
+            tnn, tnq, Sx, state,
+            rho=float(state.get("abel_rho", 0.98)),
+            tol=tol,
+        )
+        return Ix, details, transfer
     if method in {"a_box", "a_box_y0"}:
         Ix, details = least_squares_ix(
             tnn, tnq, Sx, state, tol=tol, weighted=True
