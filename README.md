@@ -118,6 +118,41 @@ Delta labels the block but does not enter the metric.  Thus the metric itself
 depends only on transverse monomial factorials; no physical amplitude box or
 fitted scale appears.
 
+### `cesaro`
+
+A_BOX-independent mean-ergodic construction anchored to the exact
+Courant-Snyder quadratic invariant. Starting with
+
+```text
+c0 = (Sx, 0)
+```
+
+it forms
+
+```text
+cN = (1/N) sum_(k=0)^(N-1) T^k c0.
+```
+
+FANQO exploits the lower block structure so the Sx block is kept exactly fixed
+and only the nonlinear coefficients are iterated. `CESARO_TERMS` controls N.
+
+### `abel`
+
+A_BOX-independent Abel/resolvent average of the same Sx seed:
+
+```text
+c_rho = (1-rho) (I-rho*T)^(-1) c0,   0 < rho < 1.
+```
+
+With Sx kept fixed, FANQO solves only the nonlinear block:
+
+```text
+(I-rho*T_nn) h = rho*T_nq*Sx.
+```
+
+`ABEL_RHO` controls rho. Values closer to 1 project more strongly toward the
+fixed subspace but also make the resolvent more ill-conditioned.
+
 ## Minimal workflow
 
 From `user/`:
@@ -131,6 +166,8 @@ a = fq.construct("a_box")
 h = fq.construct("hybrid")
 e = fq.construct("eigen")
 g = fq.construct("graded_ls")
+c = fq.construct("cesaro")
+r = fq.construct("abel")
 b = fq.construct("a_box_y0")
 ```
 
