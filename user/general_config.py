@@ -48,6 +48,15 @@ A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
 
 LEAST_SQUARES_TOL = 1.0e-16
 
+# Map-averaging invariant constructors.
+# cesaro: c_N = (1/N) sum_{k=0}^{N-1} T^k Sx
+CESARO_TERMS = 64
+
+# abel: c_rho = (1-rho) (I-rho*T)^(-1) Sx
+# Larger rho approaches the fixed subspace more strongly but makes the
+# resolvent increasingly ill-conditioned as rho -> 1.
+ABEL_RHO = 0.98
+
 
 # Paired physical tracking used by compare(name1, name2).
 # Coordinates are [xmin, xmax, ymin, ymax] in millimetres.
