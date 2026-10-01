@@ -73,6 +73,39 @@ No Gram metric `G` and no Cholesky weighting enter this construction.
 Full unscaled physical monomial basis. FANQO diagonalizes `T-I`, selects a
 near-fixed real eigenvector, and normalizes its horizontal quadratic sector.
 
+### `graded_ls`
+
+A_BOX-independent full 5-D least-squares continuation that keeps the quadratic
+Courant-Snyder part exactly fixed:
+
+```text
+Ix = Sx + I3 + I4 + ...
+```
+
+FANQO exploits the lower-triangular polynomial transfer structure and solves
+the invariant recursively by total polynomial degree.  At degree `r` it solves
+
+```text
+(I - T_rr) c_r = sum_(s<r) T_rs c_s
+```
+
+only after all lower-degree blocks are fixed.  The solve is performed in
+Courant-Snyder normalized coordinates, where
+
+```text
+Sx = X^2 + P_X^2
+Sy = Y^2 + P_Y^2
+```
+
+and the residual is measured with the Fischer product
+
+```text
+<z^alpha, z^beta>_F = alpha! delta_(alpha,beta).
+```
+
+No physical amplitude box is used by this constructor.  Delta counts as one
+polynomial degree, so terms such as `delta*x^2` are part of the cubic block.
+
 ## Minimal workflow
 
 From `user/`:
@@ -83,9 +116,10 @@ import fanqo as fq
 fq.load("general_config.py", force=True)
 
 a = fq.construct("a_box")
-b = fq.construct("a_box_y0")
 h = fq.construct("hybrid")
 e = fq.construct("eigen")
+g = fq.construct("graded_ls")
+b = fq.construct("a_box_y0")
 ```
 
 To inspect physical coefficients:
@@ -150,7 +184,7 @@ ix_construction_output/<name1>_vs_<name2>/
 
 - lattice selection;
 - Hamiltonian and polynomial order;
-- `A_BOX`;
+- `A_BOX` (used only by the a_box-family comparisons; graded_ls does not use it);
 - chromatic correction;
 - physical tracking box, grid, turns, and integration steps;
 - output controls.
