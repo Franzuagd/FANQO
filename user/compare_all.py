@@ -43,16 +43,22 @@ import fanqo as fq
 CONFIG_FILE = "general_config.py"
 
 # Keep the ordering explicit because it also defines the plot color convention.
+# The first four constructors are full 5-D methods.  graded_ls is the new
+# A_BOX-independent block-by-block construction with Sx fixed exactly.
 FULL_5D_COMPARISONS = [
     ("a_box", "hybrid"),
     ("a_box", "eigen"),
+    ("a_box", "graded_ls"),
     ("hybrid", "eigen"),
+    ("hybrid", "graded_ls"),
+    ("eigen", "graded_ls"),
 ]
 
 Y0_COMPARISONS = [
     ("a_box_y0", "a_box"),
     ("a_box_y0", "hybrid"),
     ("a_box_y0", "eigen"),
+    ("a_box_y0", "graded_ls"),
 ]
 
 
