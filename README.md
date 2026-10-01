@@ -82,29 +82,41 @@ Courant-Snyder part exactly fixed:
 Ix = Sx + I3 + I4 + ...
 ```
 
-FANQO exploits the lower-triangular polynomial transfer structure and solves
-the invariant recursively by total polynomial degree.  At degree `r` it solves
+FANQO exploits the lower-triangular polynomial transfer structure using the
+bi-grading
 
 ```text
-(I - T_rr) c_r = sum_(s<r) T_rs c_s
+(delta degree, transverse degree)
 ```
 
-only after all lower-degree blocks are fixed.  The solve is performed in
-Courant-Snyder normalized coordinates, where
+with blocks traversed in `(total degree, delta degree)` order.  This also
+captures same-total-degree couplings such as a quadratic Sx term feeding a
+`delta*x` or `delta*px` block.
+
+For each block `b` it solves
+
+```text
+(I - T_bb) c_b = sum_(a<b) T_ba c_a
+```
+
+only after all predecessor blocks are fixed.  The solve is performed in
+Courant-Snyder normalized transverse coordinates, where
 
 ```text
 Sx = X^2 + P_X^2
 Sy = Y^2 + P_Y^2
 ```
 
-and the residual is measured with the Fischer product
+and the residual is measured with the factorial Fischer product
 
 ```text
-<z^alpha, z^beta>_F = alpha! delta_(alpha,beta).
+<z^alpha, z^beta>_F = alpha! delta_(alpha,beta),
+z = (X, P_X, Y, P_Y).
 ```
 
-No physical amplitude box is used by this constructor.  Delta counts as one
-polynomial degree, so terms such as `delta*x^2` are part of the cubic block.
+Delta labels the block but does not enter the metric.  Thus the metric itself
+depends only on transverse monomial factorials; no physical amplitude box or
+fitted scale appears.
 
 ## Minimal workflow
 
