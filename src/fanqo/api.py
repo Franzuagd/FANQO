@@ -26,13 +26,15 @@ from .core import nonlinear as nl
 from .plotting import get_pyplot
 
 
-METHODS = ("a_box", "a_box_y0", "hybrid", "eigen")
+METHODS = ("a_box", "hybrid", "eigen", "graded_ls", "a_box_y0")
 _ALIASES = {
     "ls": "a_box",
     "weighted_ls": "a_box",
     "ls_y0": "a_box_y0",
     "y0": "a_box_y0",
     "cartesian_ls": "hybrid",
+    "graded": "graded_ls",
+    "block_ls": "graded_ls",
 }
 
 
