@@ -8,9 +8,14 @@ Ixcononly local workflow
 
 Public invariant methods:
     a_box
-    a_box_y0
     hybrid
     eigen
+    graded_ls
+    a_box_y0
+
+The first four are full 5-D constructors. graded_ls fixes Sx exactly and solves
+the nonlinear correction degree by degree in Courant-Snyder normalized
+coordinates with the Fischer norm. It does not use A_BOX.
 
 Main comparison:
     fq.compare("name1", "name2")
