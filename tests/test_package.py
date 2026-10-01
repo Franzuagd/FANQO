@@ -24,6 +24,8 @@ def test_public_api_is_invariant_only():
         "hybrid",
         "eigen",
         "graded_ls",
+        "cesaro",
+        "abel",
         "a_box_y0",
     )
 
