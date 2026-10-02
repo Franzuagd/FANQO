@@ -1,45 +1,31 @@
-"""Nonlinear polynomial maps and quasi-invariant mathematics.
+"""Nonlinear polynomial map and invariant constructions.
 
-Reading guide
--------------
-This module is easiest to understand in five layers:
+This file is intentionally research-oriented.  Every invariant construction
+uses the same full monomial index set
 
-1. Polynomial representation
-   idx_to_vec maps coefficient index -> [delta,x,y,px,py] exponent vector.
-   vec_to_idx is the inverse lookup.
-
-2. Lie algebra
-   The Poisson bracket is precomputed in the truncated monomial basis and used
-   to build Hamiltonian generator matrices.
-
-3. Element and lattice maps
-   element_transfer() constructs one polynomial map; nonlinear_transfer()
-   multiplies element maps in physical lattice order.
-
-4. Invariant construction
-   FANQO supports two constructions with the same monomial ordering:
-     a_box : weighted least-squares continuation of Courant-Snyder;
-     eigen : near-fixed eigenvector of the one-turn transfer.
-
-5. Evaluation / plotting / checks
-   Derivative matrices, polynomial reconstruction, 2-D sections, and numerical
-   consistency checks operate on the common invariant-vector representation.
-
-Important coordinate convention
--------------------------------
-Polynomial exponents always use
     [delta, x, y, px, py]
 
-This differs from Accelerator Toolbox tracking order
-    [x, px, y, py, delta, ct]
+and differs only through the basis scale C, the metric G, and the constructor
+itself.  To add a new invariant, write one small constructor and add it to
+CONSTRUCTORS near the bottom of the file.
 
-Machine-specific choices remain in the user configuration; this module contains
-only reusable mathematics.
+Convention
+----------
+The stored basis is
+
+    e_i(z) = C_i z**alpha_i.
+
+If c is a stored coefficient vector, its physical polynomial coefficients are
+
+    c_physical = C * c.
+
+C is therefore the central representation choice.  G is always built after C
+and represents a metric in that scaled coefficient basis.
 """
 
+from __future__ import annotations
+
 import math
-import os
-from datetime import datetime
 from math import comb
 
 import numpy as np
@@ -48,74 +34,27 @@ import sympy as sp
 from scipy.linalg import expm
 
 from . import linear as lin
-from ..plotting import get_pyplot
 
 
-def poly_to_vector(poly, variables, vec_to_idx):
-    """Convert a symbolic polynomial to the coefficient vector of the basis."""
-    if not isinstance(poly, sp.Poly):
-        poly = sp.Poly(poly, *variables)
-
-    vec = np.zeros(len(vec_to_idx), dtype=object)
-    for monom, coeff in poly.terms():
-        if monom in vec_to_idx:
-            vec[vec_to_idx[monom]] = coeff
-    return vec
-
-
-def build_monomial_basis(variables, idx_to_vec):
-    """Build physical monomials in the same order as idx_to_vec."""
-    basis = []
-    for idx in range(len(idx_to_vec)):
-        powers = idx_to_vec[idx]
-        term = 1
-        for variable, power in zip(variables, powers):
-            if power:
-                term *= variable ** power
-        basis.append(term)
-    return basis
-
-
-def vector_to_poly(vec, monomial_basis):
-    """Convert a coefficient vector in a physical monomial basis to SymPy."""
-    expr = 0
-    for coeff, basis in zip(vec, monomial_basis):
-        if coeff != 0:
-            expr += coeff * basis
-    return sp.expand(expr)
-
-
-def hamiltonian_dict(variables, hamiltonian, vec_to_idx):
-    """Return the nonzero Hamiltonian coefficients keyed by basis index."""
-    h_vec = poly_to_vector(hamiltonian, variables, vec_to_idx)
-    return {i: h_vec[i] for i in range(len(h_vec)) if h_vec[i] != 0}
-
-
-def hamiltonean_dict(variables, hamiltonian, vec_to_idx):
-    """Backward-compatible spelling of hamiltonian_dict()."""
-    return hamiltonian_dict(variables, hamiltonian, vec_to_idx)
-
+# =============================================================================
+# 1. MONOMIAL BASIS
+# =============================================================================
 
 def indexmap(v):
     """Map a nonnegative exponent vector to the graded monomial index."""
     a = len(v)
     s = sum(v)
-    index = 0
-
-    for t in range(s):
-        index += comb(t + a - 1, a - 1)
-
-    remaining_sum = s
+    index = sum(comb(t + a - 1, a - 1) for t in range(s))
+    remaining = s
     for i in range(a - 1):
-        for val in range(v[i] + 1, remaining_sum + 1):
-            index += comb(remaining_sum - val + (a - i - 2), a - i - 2)
-        remaining_sum -= v[i]
-
+        for value in range(v[i] + 1, remaining + 1):
+            index += comb(remaining - value + (a - i - 2), a - i - 2)
+        remaining -= v[i]
     return index
 
 
 def vectormap(idx, a):
-    """Inverse of indexmap() for exponent vectors of length a."""
+    """Inverse of indexmap for exponent vectors of length a."""
     s = 0
     while True:
         count = comb(s + a - 1, a - 1)
@@ -125,414 +64,313 @@ def vectormap(idx, a):
         s += 1
 
     v = []
-    remaining_sum = s
+    remaining = s
     for i in range(a - 1):
-        for val in range(remaining_sum, -1, -1):
-            count = comb(remaining_sum - val + (a - i - 2), a - i - 2)
+        for value in range(remaining, -1, -1):
+            count = comb(remaining - value + (a - i - 2), a - i - 2)
             if count <= idx:
                 idx -= count
             else:
-                v.append(val)
-                remaining_sum -= val
+                v.append(value)
+                remaining -= value
                 break
-
-    v.append(remaining_sum)
+    v.append(remaining)
     return v
 
 
 def quadratic_size(n=2):
-    """Number of transverse monomials of degree <= 2 for n canonical planes."""
+    """Number of delta=0 transverse monomials of degree <= 2."""
     ndim = 2 * n
     return sum(comb(s + ndim - 1, ndim - 1) for s in range(3))
 
 
-def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
-    """Build the scaled a_box polynomial representation.
-
-    Conceptually this function performs four jobs:
-
-    1. enumerate the truncated monomial basis;
-    2. build the Gram matrix G and diagonal monomial scale epsilon;
-    3. precompute the Poisson-bracket tensor in that scaled basis;
-    4. convert the symbolic Hamiltonian into reusable Lie-generator matrices.
-
-    The output is a dictionary because the same basis data must be reused for
-    thousands of objective evaluations during an optimization.
-
-    Parameters
-    ----------
-
-    Parameters
-    ----------
-    m : int
-        Maximum transverse polynomial degree.
-    d : int
-        Maximum delta degree.
-    hamiltonian : sympy expression
-        User-specified Hamiltonian from general_config.py.
-    a_box : sequence
-        Physical half-widths ordered exactly like ``variables``.
-    variables : sequence of sympy.Symbol
-        Polynomial variables, expected as [delta, x, y, px, py] for n=2.
-    field_symbols : sequence of sympy.Symbol
-        Element coefficients used by the Hamiltonian, expected to receive
-        [curvature, K, S, O, fifth-order coefficient].
-    """
-    if n != 2:
-        raise NotImplementedError("The current block structure assumes n=2 (x and y planes).")
-    if m < 2:
-        raise ValueError("m must be at least 2 because the invariant contains a quadratic block.")
-    if d < 0:
-        raise ValueError("d must be nonnegative.")
-    if len(variables) != 5:
-        raise ValueError("The current model requires variables=[delta, x, y, px, py].")
-    if len(field_symbols) != 5:
-        raise ValueError("field_symbols must contain exactly five symbols [b1,b2,b3,b4,b5].")
-
+def monomial_index_maps(m, d, n=2):
+    """Build the common full basis used by every invariant method."""
     ndim = 2 * n
-
-    # A_BOX[2] == 0 is an explicit request for the invariant submanifold
-    # y = py = 0.  In that mode FANQO builds a genuinely reduced horizontal
-    # polynomial space rather than approximating the slice with a tiny y box.
-    #
-    # The public exponent convention remains [delta, x, y, px, py], but every
-    # retained monomial has y_degree = py_degree = 0.  This keeps downstream
-    # labeling/evaluation compatible while making G, the Poisson algebra, and
-    # the least-squares problem depend only on (delta, x, px).
-    if np.isscalar(a_box):
-        a_box = np.full(len(variables), float(a_box))
-    else:
-        a_box = np.asarray(a_box, dtype=float)
-
-    if len(a_box) != len(variables):
-        raise ValueError(
-            f"a_box must have {len(variables)} entries, received {len(a_box)}."
-        )
-    if not np.all(np.isfinite(a_box)):
-        raise ValueError("Every a_box entry must be finite.")
-
-    horizontal_slice_only = bool(a_box[2] == 0.0)
-    if horizontal_slice_only:
-        if a_box[0] <= 0.0 or a_box[1] <= 0.0 or a_box[3] <= 0.0:
-            raise ValueError(
-                "With A_BOX[2]=0, delta, x, and px half-widths must remain positive."
-            )
-        if a_box[4] < 0.0:
-            raise ValueError("The py half-width cannot be negative.")
-        a_box = a_box.copy()
-        a_box[2] = 0.0
-        a_box[4] = 0.0
-    elif np.any(a_box <= 0.0):
-        raise ValueError(
-            "Every a_box entry must be positive, except A_BOX[2]=0 which "
-            "activates the horizontal y=py=0 LS mode."
-        )
-
-    # Basis bookkeeping. Every coefficient index k still uses the public
-    # [delta,x,y,px,py] exponent vector.
+    layer_size = sum(comb(s + ndim - 1, ndim - 1) for s in range(m + 1))
     idx_to_vec = {}
     vec_to_idx = {}
 
-    if horizontal_slice_only:
-        active_transverse_dim = 2  # x, px
-        layer_size = sum(
-            comb(s + active_transverse_dim - 1, active_transverse_dim - 1)
-            for s in range(m + 1)
-        )
-        for delta_degree in range(d + 1):
-            offset = delta_degree * layer_size
-            for idx in range(layer_size):
-                x_degree, px_degree = vectormap(idx, active_transverse_dim)
-                v = [delta_degree, x_degree, 0, px_degree, 0]
-                idx_to_vec[offset + idx] = v
-                vec_to_idx[tuple(v)] = offset + idx
-    else:
-        layer_size = sum(comb(s + ndim - 1, ndim - 1) for s in range(m + 1))
-        for delta_degree in range(d + 1):
-            offset = delta_degree * layer_size
-            for idx in range(layer_size):
-                v = [delta_degree] + vectormap(idx, ndim)
-                idx_to_vec[offset + idx] = v
-                vec_to_idx[tuple(v)] = offset + idx
+    for delta_degree in range(d + 1):
+        offset = delta_degree * layer_size
+        for idx in range(layer_size):
+            powers = [delta_degree] + vectormap(idx, ndim)
+            idx_to_vec[offset + idx] = powers
+            vec_to_idx[tuple(powers)] = offset + idx
 
-    size = len(idx_to_vec)
-    dim = len(idx_to_vec[0])
-    bracket_pairs = {}
-    keys = list(idx_to_vec)
-
-    for i in keys:
-        fi = idx_to_vec[i]
-        for j in keys:
-            fj = idx_to_vec[j]
-            base = [fi[t] + fj[t] for t in range(dim)]
-
-            for plane in range(1 if horizontal_slice_only else n):
-                q_idx = 1 + plane
-                p_idx = 3 + plane
-                if base[q_idx] == 0 or base[p_idx] == 0:
-                    continue
-
-                cand = base.copy()
-                cand[q_idx] -= 1
-                cand[p_idx] -= 1
-                k = vec_to_idx.get(tuple(cand))
-                if k is not None:
-                    bracket_pairs.setdefault((k, i), []).append((j, plane))
-
-    h_dict = hamiltonian_dict(variables, hamiltonian, vec_to_idx)
-
-    # G is the coefficient-space representation of the polynomial inner
-    # product on the normalized symmetric box. Odd total powers integrate to
-    # zero, which explains the parity test below.
-    G = np.zeros((size, size), dtype=float)
-    for i in range(size):
-        fi = idx_to_vec[i]
-        for j in range(i, size):
-            fj = idx_to_vec[j]
-            val = 1.0
-            for l in range(dim):
-                s_ij = fi[l] + fj[l]
-                if s_ij % 2:
-                    val = 0.0
-                    break
-                val *= np.sqrt((2 * fi[l] + 1) * (2 * fj[l] + 1)) / (s_ij + 1)
-            G[i, j] = val
-            G[j, i] = val
-
-    # epsilon rescales each physical monomial using the chosen a_box. This is
-    # what makes coefficients from very different physical powers comparable.
-    epsilon = np.zeros(size, dtype=float)
-    for i in range(size):
-        fi = idx_to_vec[i]
-        val = 1.0
-        for l in range(dim):
-            val *= np.sqrt((2 * fi[l] + 1) / (a_box[l] ** (2 * fi[l])))
-        epsilon[i] = val
-
-    B = [sps.lil_matrix((size, size), dtype=float) for _ in range(size)]
-    for (k, i), pairs in bracket_pairs.items():
-        fi = idx_to_vec[i]
-        for j, plane in pairs:
-            fj = idx_to_vec[j]
-            q_idx = 1 + plane
-            p_idx = 3 + plane
-            sympl = fi[q_idx] * fj[p_idx] - fi[p_idx] * fj[q_idx]
-            if sympl:
-                B[k][i, j] += sympl * epsilon[i] * epsilon[j] / epsilon[k]
-
-    B = [matrix.tocsr() for matrix in B]
-    order = sorted(h_dict)
-    h_vec = sp.Matrix([sp.sympify(h_dict[j]) for j in order])
-    h_vec_func = sp.lambdify(list(field_symbols), h_vec, modules="numpy")
-
-    # B[k][i, j] stores the coefficient of {e_i, e_j}.
-    #
-    # For transport we define the Hamiltonian Lie matrix by
-    #
-    #       M(H) f = {f, H}.
-    #
-    # The row selected below is i = Hamiltonian basis index, so B gives
-    # {H, f}.  The minus sign converts it to {f, H}.  With this convention
-    # coefficient transport is dc/ds = -M(H)c and therefore T = exp(-L M).
-    M_basis = []
-    for i in order:
-        Mi = sps.lil_matrix((size, size), dtype=float)
-        for k in range(size):
-            row = B[k].getrow(i)
-            if row.nnz:
-                for j, val in zip(row.indices, row.data):
-                    Mi[k, j] = -val / epsilon[i]
-        M_basis.append(Mi.toarray())
-
-    # Isolate the unit integrated-octupole Hamiltonian contribution.  Evaluating
-    # H at b4=1 alone would also include field-independent kinetic terms.
-    zero_fields = np.zeros(len(field_symbols), dtype=float)
-    octupole_fields = zero_fields.copy()
-    octupole_fields[3] = 1.0
-    h_zero = np.asarray(h_vec_func(*zero_fields), dtype=float).reshape(-1)
-    h_oct = (
-        np.asarray(h_vec_func(*octupole_fields), dtype=float).reshape(-1)
-        - h_zero
-    )
-
-    M_octupole_unit = np.zeros(M_basis[0].shape, dtype=float)
-    for coeff, basis_matrix in zip(h_oct, M_basis):
-        if coeff != 0.0:
-            M_octupole_unit += float(coeff) * basis_matrix
-
-    return {
-        "m": int(m),
-        "d": int(d),
-        "n": int(n),
-        "variables": tuple(variables),
-        "field_symbols": tuple(field_symbols),
-        "hamiltonian": sp.expand(hamiltonian),
-        "idx_to_vec": idx_to_vec,
-        "vec_to_idx": vec_to_idx,
-        "bracket_pairs": bracket_pairs,
-        "G": G,
-        "epsilon": epsilon,
-        "B": B,
-        "H_vec_func": h_vec_func,
-        "M_basis": M_basis,
-        "M_octupole_unit": M_octupole_unit,
-        "order": order,
-        "H_dict": h_dict,
-        "quad_size": quadratic_size(1 if horizontal_slice_only else n),
-        "nonquad_size": size - quadratic_size(1 if horizontal_slice_only else n),
-        "monomial_basis": build_monomial_basis(variables, idx_to_vec),
-        "a_box": a_box.copy(),
-        "horizontal_slice_only": horizontal_slice_only,
-        "active_variables": (
-            ("delta", "x", "px")
-            if horizontal_slice_only
-            else ("delta", "x", "y", "px", "py")
-        ),
-        "invariant_construction": "a_box",
-        "transport_sign": -1.0,
-        "coordinate_scale": np.asarray(a_box, dtype=float).copy(),
-    }
+    return idx_to_vec, vec_to_idx
 
 
-def load_eigen(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
-    """Build the unscaled eigenvector representation on the same monomial order.
+def build_monomial_basis(variables, idx_to_vec):
+    """Return symbolic physical monomials in the common index order."""
+    basis = []
+    for i in range(len(idx_to_vec)):
+        term = 1
+        for variable, power in zip(variables, idx_to_vec[i]):
+            if power:
+                term *= variable ** int(power)
+        basis.append(term)
+    return basis
 
-    The exponent dictionaries are intentionally identical to load(). The
-    difference is mathematical representation, not basis notation:
 
-      * coefficient scale C = 1;
-      * epsilon = 1;
-      * G is the physical-monomial Gram matrix on a unit symmetric box;
-      * M(H)f = {H,f};
-      * thick transport is exp(+L M).
+def poly_to_vector(poly, variables, vec_to_idx):
+    """Convert a symbolic polynomial to physical monomial coefficients."""
+    if not isinstance(poly, sp.Poly):
+        poly = sp.Poly(poly, *variables)
+    vector = np.zeros(len(vec_to_idx), dtype=object)
+    for monom, coefficient in poly.terms():
+        if monom in vec_to_idx:
+            vector[vec_to_idx[monom]] = coefficient
+    return vector
 
-    Keeping the same idx_to_vec / vec_to_idx interface is what lets every
-    downstream objective, plot, and report consume Ix without caring how the
-    invariant was constructed.
 
+def vector_to_poly(vec, monomial_basis):
+    """Convert physical monomial coefficients to a SymPy expression."""
+    expression = 0
+    for coefficient, basis_term in zip(vec, monomial_basis):
+        if coefficient != 0:
+            expression += coefficient * basis_term
+    return sp.expand(expression)
+
+
+# =============================================================================
+# 2. BASIS SCALE C AND METRIC G
+# =============================================================================
+
+def C_identity(idx_to_vec):
+    """Unscaled physical monomial basis."""
+    return np.ones(len(idx_to_vec), dtype=float)
+
+
+def C_from_coordinates(idx_to_vec, coordinate_scale):
+    """Lift a five-component coordinate scale to a monomial scale C."""
+    scale = np.asarray(coordinate_scale, dtype=float)
+    if scale.shape != (5,):
+        raise ValueError("A coordinate C must have five entries [delta,x,y,px,py].")
+    if not np.all(np.isfinite(scale)) or np.any(scale <= 0.0):
+        raise ValueError("Coordinate C entries must be positive and finite.")
+
+    C = np.ones(len(idx_to_vec), dtype=float)
+    for i, powers in idx_to_vec.items():
+        for value, power in zip(scale, powers):
+            if power:
+                C[i] *= float(value) ** int(power)
+    return C
+
+
+def C_a_box(idx_to_vec, a_box):
+    """Original a_box monomial normalization written explicitly as C."""
+    a = np.asarray(a_box, dtype=float)
+    if a.shape != (5,) or not np.all(np.isfinite(a)) or np.any(a <= 0.0):
+        raise ValueError("A_BOX must contain five positive finite half-widths.")
+
+    C = np.ones(len(idx_to_vec), dtype=float)
+    for i, powers in idx_to_vec.items():
+        value = 1.0
+        for half_width, power in zip(a, powers):
+            power = int(power)
+            value *= math.sqrt(2 * power + 1) / (float(half_width) ** power)
+        C[i] = value
+    return C
+
+
+def C_fischer(idx_to_vec):
+    """Scale so Euclidean stored coefficients carry the Fischer factorial norm.
+
+    Delta is a grading parameter; factorials are applied only to transverse
+    exponents.  Since physical_coeff = C * stored_coeff, choosing
+
+        C_i = 1 / sqrt(alpha!)
+
+    makes ||stored||_2^2 = sum alpha! |physical_coeff|^2.
     """
-    dim = len(variables)
-    a_box = np.asarray(a_box, dtype=float)
-    if a_box.shape != (dim,):
-        raise ValueError(f"a_box must have {dim} entries, received {len(a_box)}.")
-    if not np.all(np.isfinite(a_box)) or np.any(a_box <= 0.0):
-        raise ValueError("Every a_box entry must be positive and finite.")
+    C = np.ones(len(idx_to_vec), dtype=float)
+    for i, powers in idx_to_vec.items():
+        factorial = 1
+        for power in powers[1:]:
+            factorial *= math.factorial(int(power))
+        C[i] = 1.0 / math.sqrt(float(factorial))
+    return C
 
-    base = load(
-        m, d, hamiltonian, np.ones(dim, dtype=float),
-        variables, field_symbols, n=n,
-    )
 
-    idx_to_vec = base["idx_to_vec"]
+def build_C(idx_to_vec, specification="identity", *, a_box=None):
+    """Build C from a named rule, a five-vector, a full vector, or a callable."""
+    if callable(specification):
+        C = np.asarray(specification(idx_to_vec), dtype=float)
+    elif isinstance(specification, str):
+        key = specification.lower()
+        if key in {"identity", "physical", "ones"}:
+            C = C_identity(idx_to_vec)
+        elif key in {"a_box", "box"}:
+            C = C_a_box(idx_to_vec, a_box)
+        elif key in {"fischer", "factorial"}:
+            C = C_fischer(idx_to_vec)
+        else:
+            raise ValueError(f"Unknown C specification: {specification!r}")
+    else:
+        values = np.asarray(specification, dtype=float)
+        if values.shape == (5,):
+            C = C_from_coordinates(idx_to_vec, values)
+        elif values.shape == (len(idx_to_vec),):
+            C = values.copy()
+        else:
+            raise ValueError(
+                "C must be a named rule, a five-component coordinate scale, "
+                "or one value per monomial."
+            )
+
+    if C.shape != (len(idx_to_vec),):
+        raise ValueError("C has the wrong size for the polynomial basis.")
+    if not np.all(np.isfinite(C)) or np.any(C <= 0.0):
+        raise ValueError("Every monomial scale C_i must be positive and finite.")
+    return C
+
+
+def G_identity(C):
+    """Euclidean metric in the scaled coefficient basis."""
+    return np.eye(len(C), dtype=float)
+
+
+def G_box(idx_to_vec, C, a_box):
+    """L2 metric on the symmetric physical box, expressed in the C-scaled basis.
+
+    The normalized box average is used, so for one coordinate
+
+        E[z^p] = 0                    for odd p,
+        E[z^p] = a^p / (p + 1)       for even p.
+
+    Consequently G depends explicitly on C and optionally on A_BOX.
+    """
+    a = np.asarray(a_box, dtype=float)
+    if a.shape != (5,) or np.any(a <= 0.0):
+        raise ValueError("G='box' requires a positive five-component A_BOX.")
+
     size = len(idx_to_vec)
-
     G = np.zeros((size, size), dtype=float)
     for i in range(size):
         fi = idx_to_vec[i]
         for j in range(i, size):
             fj = idx_to_vec[j]
-            value = 1.0
-            for axis in range(dim):
-                power = fi[axis] + fj[axis]
+            value = float(C[i] * C[j])
+            for half_width, pi, pj in zip(a, fi, fj):
+                power = int(pi) + int(pj)
                 if power % 2:
                     value = 0.0
                     break
-                value *= 1.0 / (power + 1.0)
+                value *= float(half_width) ** power / (power + 1.0)
             G[i, j] = value
             G[j, i] = value
+    return G
 
-    epsilon = np.ones(size, dtype=float)
 
-    B = [sps.lil_matrix((size, size), dtype=float) for _ in range(size)]
-    for (k, i), pairs in base["bracket_pairs"].items():
-        fi = idx_to_vec[i]
-        for j, plane in pairs:
+def G_fischer_physical(idx_to_vec, C):
+    """Fischer metric for an arbitrary C-scaled representation."""
+    diagonal = np.ones(len(idx_to_vec), dtype=float)
+    for i, powers in idx_to_vec.items():
+        factorial = 1
+        for power in powers[1:]:
+            factorial *= math.factorial(int(power))
+        diagonal[i] = float(factorial) * float(C[i]) ** 2
+    return np.diag(diagonal)
+
+
+def build_G(idx_to_vec, C, specification="coefficient", *, a_box=None):
+    """Build G after C.
+
+    A custom metric can be supplied as a matrix or callable.  This function is
+    the intended edit point for new research metrics.
+    """
+    if callable(specification):
+        G = np.asarray(specification(idx_to_vec, C), dtype=float)
+    elif isinstance(specification, str):
+        key = specification.lower()
+        if key in {"coefficient", "identity", "euclidean"}:
+            G = G_identity(C)
+        elif key in {"box", "a_box"}:
+            G = G_box(idx_to_vec, C, a_box)
+        elif key in {"fischer", "factorial"}:
+            G = G_fischer_physical(idx_to_vec, C)
+        else:
+            raise ValueError(f"Unknown G specification: {specification!r}")
+    else:
+        G = np.asarray(specification, dtype=float).copy()
+
+    expected = (len(idx_to_vec), len(idx_to_vec))
+    if G.shape != expected:
+        raise ValueError(f"G must have shape {expected}, received {G.shape}.")
+    return G
+
+
+# =============================================================================
+# 3. LIE MAP IN THE C-SCALED BASIS
+# =============================================================================
+
+def hamiltonian_data(variables, hamiltonian, vec_to_idx, field_symbols):
+    """Return physical Hamiltonian coefficients and a numerical evaluator."""
+    vector = poly_to_vector(hamiltonian, variables, vec_to_idx)
+    order = [i for i, value in enumerate(vector) if value != 0]
+    symbolic = sp.Matrix([sp.sympify(vector[i]) for i in order])
+    evaluator = sp.lambdify(list(field_symbols), symbolic, modules="numpy")
+    return order, evaluator
+
+
+def build_M_basis(idx_to_vec, vec_to_idx, C, hamiltonian_order, n=2):
+    """Matrices for unit physical Hamiltonian monomials.
+
+    M(H) f = {f,H}.  The basis is e_j=C_j z**alpha_j, while each Hamiltonian
+    basis matrix corresponds to physical H=z**alpha_i.  Therefore
+
+        M_i[k,j] = bracket(alpha_j, alpha_i) C_j / C_k.
+    """
+    size = len(idx_to_vec)
+    matrices = []
+
+    for i in hamiltonian_order:
+        hi = idx_to_vec[i]
+        M = sps.lil_matrix((size, size), dtype=float)
+
+        for j in range(size):
             fj = idx_to_vec[j]
-            q_idx = 1 + plane
-            p_idx = 3 + plane
-            sympl = fi[q_idx] * fj[p_idx] - fi[p_idx] * fj[q_idx]
-            if sympl:
-                B[k][i, j] += float(sympl)
-    B = [matrix.tocsr() for matrix in B]
+            base = [int(a) + int(b) for a, b in zip(fj, hi)]
 
-    # B[k][i,j] is the coefficient of {e_i,e_j}; selecting the Hamiltonian
-    # row therefore builds M(H)f={H,f}. There is intentionally no minus sign.
-    M_basis = []
-    for i in base["order"]:
-        Mi = sps.lil_matrix((size, size), dtype=float)
-        for k in range(size):
-            row = B[k].getrow(i)
-            if row.nnz:
-                for j, value in zip(row.indices, row.data):
-                    Mi[k, j] = float(value)
-        M_basis.append(Mi.toarray())
+            for plane in range(n):
+                q = 1 + plane
+                p = 3 + plane
+                symplectic = int(fj[q]) * int(hi[p]) - int(fj[p]) * int(hi[q])
+                if symplectic == 0:
+                    continue
 
-    zero_fields = np.zeros(len(field_symbols), dtype=float)
-    octupole_fields = zero_fields.copy()
-    octupole_fields[3] = 1.0
-    h_zero = np.asarray(
-        base["H_vec_func"](*zero_fields), dtype=float
-    ).reshape(-1)
-    h_oct = (
-        np.asarray(base["H_vec_func"](*octupole_fields), dtype=float).reshape(-1)
-        - h_zero
-    )
-    M_octupole_unit = np.zeros(M_basis[0].shape, dtype=float)
-    for coeff, basis_matrix in zip(h_oct, M_basis):
-        if coeff != 0.0:
-            M_octupole_unit += float(coeff) * basis_matrix
+                target = base.copy()
+                target[q] -= 1
+                target[p] -= 1
+                k = vec_to_idx.get(tuple(target))
+                if k is not None:
+                    M[k, j] += float(symplectic) * float(C[j]) / float(C[k])
 
-    state = dict(base)
-    state.update({
-        "G": G,
-        "epsilon": epsilon,
-        "B": B,
-        "M_basis": M_basis,
-        "M_octupole_unit": M_octupole_unit,
-        "a_box": np.asarray(a_box, dtype=float).copy(),
-        "invariant_construction": "eigen",
-        "transport_sign": 1.0,
-        "coordinate_scale": np.ones(dim, dtype=float),
-    })
-    return state
+        matrices.append(M.toarray())
+
+    return matrices
 
 
 def assemble_M(h_vec, M_basis):
-    """Assemble M(H) by linearly combining precomputed basis generators.
-
-    h_vec contains the Hamiltonian coefficients for one element. M_basis holds
-    the matrix representation associated with each Hamiltonian basis monomial.
-    The expensive bracket algebra is therefore done once in load()/load_eigen(),
-    not once per magnet and not once per optimizer candidate.
-    """
-    if not M_basis:
-        raise ValueError("M_basis is empty.")
-    M = np.zeros(M_basis[0].shape, dtype=float)
-    for coeff, basis_matrix in zip(h_vec, M_basis):
-        if coeff != 0:
-            M += float(coeff) * basis_matrix
+    """Assemble M(H) from physical Hamiltonian coefficients."""
+    M = np.zeros_like(M_basis[0], dtype=float)
+    for coefficient, basis_matrix in zip(h_vec, M_basis):
+        if coefficient != 0.0:
+            M += float(coefficient) * basis_matrix
     return M
 
 
 def element_hamiltonian_values(elem):
-    """Translate one thick lattice element to Hamiltonian coefficients.
-
-    The returned length is always the physical length.  A zero-length
-    multipole is handled separately by :func:`element_transfer` as an
-    integrated kick; no artificial thin-element length is introduced.
-    """
-    physical_length = float(lin.magnet_field(elem, "LENGTH"))
-
-    if physical_length > 0.0:
-        curvature = math.radians(
-            float(lin.magnet_field(elem, "ANGLE"))
-        ) / physical_length
+    """Return length and the five Hamiltonian field coefficients."""
+    L = float(lin.magnet_field(elem, "LENGTH"))
+    if L > 0.0:
+        b1 = math.radians(float(lin.magnet_field(elem, "ANGLE"))) / L
     else:
-        curvature = 0.0
-
+        b1 = 0.0
     return (
-        physical_length,
-        curvature,
+        L,
+        b1,
         float(lin.magnet_field(elem, "K")),
         float(lin.magnet_field(elem, "S")),
         float(lin.magnet_field(elem, "O")),
@@ -540,239 +378,103 @@ def element_hamiltonian_values(elem):
     )
 
 
-def element_transfer(
-    elem,
-    state,
-    tol=1e-14,
-    check_upper_right=False,
-    **_legacy_kwargs,
-):
-    """Construct the nonlinear polynomial transfer matrix of one element.
-
-    Sign convention is selected by the nonlinear state:
-        a_box : M(H)f={f,H}, T=exp(-L M)
-        eigen : M(H)f={H,f}, T=exp(+L M)
-
-    The two lines use opposite definitions of the Lie operator, so the opposite
-    exponential signs are part of the convention rather than two different
-    physical Hamiltonian flows.
-
-    For a zero-length octupole, O is already the integrated strength.  The
-    integrated transport generator uses the same state-dependent sign and the kick is
-    applied directly as T = I + ML.  No fictitious length enters the map.
-
-    Extra keyword arguments are ignored only for compatibility with older
-    runners; they do not affect the physics.
-    """
-    M_basis = state["M_basis"]
-    if not M_basis:
-        raise ValueError("M_basis is empty.")
-
-    size = M_basis[0].shape[0]
-    identity = np.eye(size)
-
-    element_type = lin.magnet_field(elem, "TYPE")
-    physical_length = float(lin.magnet_field(elem, "LENGTH"))
+def element_transfer(elem, state, tol=1e-14, check_upper_right=False, **_):
+    """Polynomial coefficient transfer through one lattice element."""
+    size = len(state["idx_to_vec"])
+    identity = np.eye(size, dtype=float)
+    L = float(lin.magnet_field(elem, "LENGTH"))
+    typ = str(lin.magnet_field(elem, "TYPE"))
     O = float(lin.magnet_field(elem, "O"))
 
-    if physical_length == 0.0:
-        if element_type == "multipole" and O != 0.0:
-            # O is already integrated.  Do not divide by, multiply by,
-            # or invent a thin-element length.
-            transport_sign = float(state.get("transport_sign", -1.0))
-            ML = transport_sign * O * state["M_octupole_unit"]
-            tmatrix = identity + ML
+    if L == 0.0:
+        if typ == "multipole" and O != 0.0:
+            T = identity - O * state["M_octupole_unit"]
         else:
-            tmatrix = identity
+            T = identity
     else:
         L, b1, b2, b3, b4, b5 = element_hamiltonian_values(elem)
-        h_vec = np.asarray(
+        h = np.asarray(
             state["H_vec_func"](b1, b2, b3, b4, b5),
             dtype=float,
         ).reshape(-1)
-        M = assemble_M(h_vec, M_basis)
-        transport_sign = float(state.get("transport_sign", -1.0))
-        tmatrix = expm(transport_sign * L * M)
+        T = expm(-L * assemble_M(h, state["M_basis"]))
 
     q = state["quad_size"]
-    Mqq = tmatrix[:q, :q]
-    Mqn = tmatrix[:q, q:]
-    Mnq = tmatrix[q:, :q]
-    Mnn = tmatrix[q:, q:]
+    if check_upper_right and not np.all(np.abs(T[:q, q:]) < tol):
+        raise ValueError("Upper-right nonlinear block is not zero.")
 
-    if check_upper_right and not np.all(np.abs(Mqn) < tol):
-        raise ValueError(
-            f"Upper-right nonlinear block is not zero within tolerance {tol}."
-        )
-
-    return tmatrix, Mqq, Mnn, Mqn, Mnq
+    return T, T[:q, :q], T[q:, q:], T[:q, q:], T[q:, :q]
 
 
-def nonlinear_transfer(lattice, state, tol=1e-14, check_upper_right=False, cache=True, **_legacy_kwargs):
-    """Construct the nonlinear transfer matrix of an ordered lattice.
-
-    When cache=True, repeated magnet families reuse their already-computed
-    element transfer matrix.  This is important for a full ring with many
-    repeated occurrences of the same magnet objects.
-    """
+def nonlinear_transfer(
+    lattice,
+    state,
+    tol=1e-14,
+    check_upper_right=False,
+    cache=True,
+    **_,
+):
+    """One-turn polynomial transfer in the current C-scaled basis."""
     size = len(state["idx_to_vec"])
-    transfer = np.eye(size)
+    T = np.eye(size, dtype=float)
     element_cache = {}
 
     for elem in lattice:
-        key = id(elem) if cache else None
+        key = id(elem)
         if cache and key in element_cache:
-            tmatrix = element_cache[key]
+            Te = element_cache[key]
         else:
-            tmatrix = element_transfer(
+            Te = element_transfer(
                 elem,
                 state,
                 tol=tol,
                 check_upper_right=check_upper_right,
             )[0]
             if cache:
-                element_cache[key] = tmatrix
-        transfer = tmatrix @ transfer
+                element_cache[key] = Te
+        T = Te @ T
 
     q = state["quad_size"]
-    return transfer, transfer[q:, q:], transfer[q:, :q]
+    return T, T[q:, q:], T[q:, :q]
 
 
-def Non_linear_Transfer(lattice, H_vec, M_basis):
-    """Deprecated compatibility wrapper.
+# =============================================================================
+# 4. STATE
+# =============================================================================
 
-    New code should use nonlinear_transfer(lattice, state).  This wrapper is
-    retained only for older callers that explicitly pass H_vec/M_basis.
-    """
-    raise RuntimeError(
-        "Non_linear_Transfer no longer uses module globals. Use nonlinear_transfer(lattice, state)."
-    )
-
+DEFAULT_METHOD_OPTIONS = {
+    "a_box": {"C": "a_box", "G": "box"},
+    "a_box_y0": {"C": "a_box", "G": "box", "horizontal_only": True},
+    "hybrid": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
+    "eigen": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
+    "graded_ls": {"C": "fischer", "G": "coefficient"},
+    "cesaro": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
+    "abel": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
+}
 
 
 def build_derivative_matrix(state, variable_index):
-    """Build the sparse coefficient-space derivative matrix for one variable.
-
-    The invariant vectors stored by this module are coefficients of the scaled
-    physical basis
-
-        C_k z**alpha_k.
-
-    Therefore, if alpha_k[variable_index] = r and differentiation maps basis
-    index k to j, then
-
-        (D_variable)_[j,k] = r * C_k / C_j.
-
-    With this convention ``D @ coeffs`` is the coefficient vector of the
-    physical derivative in the same scaled basis.  The matrix has at most one
-    nonzero entry per column, so applying it is very cheap.
-    """
-    if "C" not in state:
-        raise KeyError("state must contain C before derivative matrices are built.")
-
+    """Derivative operator in the same C-scaled coefficient basis."""
     idx_to_vec = state["idx_to_vec"]
     vec_to_idx = state["vec_to_idx"]
     C = np.asarray(state["C"], dtype=float)
     size = len(idx_to_vec)
-
-    if not 0 <= int(variable_index) < len(idx_to_vec[0]):
-        raise ValueError("variable_index is outside the polynomial exponent vector.")
-
-    rows = []
-    cols = []
-    values = []
+    rows, cols, values = [], [], []
 
     for k in range(size):
         powers = list(idx_to_vec[k])
-        power = powers[variable_index]
+        power = int(powers[variable_index])
         if power == 0:
             continue
-
         powers[variable_index] -= 1
         j = vec_to_idx.get(tuple(powers))
         if j is None:
             continue
-
         rows.append(j)
         cols.append(k)
-        values.append(float(power) * C[k] / C[j])
+        values.append(power * C[k] / C[j])
 
-    return sps.csr_matrix((values, (rows, cols)), shape=(size, size), dtype=float)
-
-def initialize_nonlinear(data, m, d, hamiltonian, a_box, variables, field_symbols, n=2):
-    """Build nonlinear state and attach the linear-lattice normalization."""
-    state = load(m, d, hamiltonian, a_box, variables, field_symbols, n=n)
-    cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
-    bx0, ax0, gx0, _, _, _ = cs0
-
-    vec_to_idx = state["vec_to_idx"]
-    epsilon = state["epsilon"]
-
-    idx_x2 = vec_to_idx[(0, 2, 0, 0, 0)]
-    idx_xpx = vec_to_idx[(0, 1, 0, 1, 0)]
-    idx_px2 = vec_to_idx[(0, 0, 0, 2, 0)]
-
-    normalization_arg = (
-        bx0 * gx0 / (epsilon[idx_px2] * epsilon[idx_x2])
-        - ax0**2 / (epsilon[idx_xpx] ** 2)
-    )
-    if normalization_arg <= 0.0:
-        raise ValueError(
-            "Invariant normalization is not positive for this lattice/a_box: "
-            f"{normalization_arg}."
-        )
-
-    C = epsilon * math.sqrt(normalization_arg)
-    q = state["quad_size"]
-
-    state = dict(state)
-    state["C"] = C
-    state["Gqq"] = state["G"][:q, :q]
-    state["Gnn"] = state["G"][q:, q:]
-    state["linear_cs0"] = cs0.copy()
-
-    # Fast coefficient-space derivatives used by the shape/stability objective.
-    # Variable order is [delta, x, y, px, py].
-    state["D_x"] = build_derivative_matrix(state, 1)
-    state["D_y"] = build_derivative_matrix(state, 2)
-    state["D_px"] = build_derivative_matrix(state, 3)
-    state["D_py"] = build_derivative_matrix(state, 4)
-
-    return state
-
-
-def initialize_nonlinear_eigen(
-    data,
-    m,
-    d,
-    hamiltonian,
-    a_box,
-    variables,
-    field_symbols,
-    n=2,
-):
-    """Initialize the reference eigenvector construction in physical monomials."""
-    state = load_eigen(
-        m, d, hamiltonian, a_box, variables, field_symbols, n=n
-    )
-    size = len(state["idx_to_vec"])
-    q = state["quad_size"]
-
-    state = dict(state)
-    # Requested coordinate C=(1,1,1,1,1). Downstream FANQO stores one scale
-    # per monomial, so the compatible coefficient scale is the identity.
-    state["C"] = np.ones(size, dtype=float)
-    state["coordinate_scale"] = np.ones(len(variables), dtype=float)
-    state["Gqq"] = state["G"][:q, :q]
-    state["Gnn"] = state["G"][q:, q:]
-    state["linear_cs0"] = np.asarray(
-        lin.linear_data(data, "CS0"), dtype=float
-    ).copy()
-    state["D_x"] = build_derivative_matrix(state, 1)
-    state["D_y"] = build_derivative_matrix(state, 2)
-    state["D_px"] = build_derivative_matrix(state, 3)
-    state["D_py"] = build_derivative_matrix(state, 4)
-    return state
+    return sps.csr_matrix((values, (rows, cols)), shape=(size, size))
 
 
 def initialize_nonlinear_for_method(
@@ -785,112 +487,206 @@ def initialize_nonlinear_for_method(
     field_symbols,
     n=2,
     invariant_construction="a_box",
+    options=None,
 ):
-    """Build the polynomial representation used by one Ix constructor.
-
-    Methods
-    -------
-    a_box
-        Full 5-D scaled monomial basis and G-weighted least squares.
-    a_box_y0
-        Exact invariant submanifold y=py=0. The basis itself is reduced to
-        (delta, x, px) before G and the Lie matrices are built.
-    hybrid
-        Same unscaled physical monomial representation used by eigen, but Ix is
-        obtained later with ordinary Euclidean least squares (no G weighting).
-    eigen
-        Full unscaled physical monomial representation and near-fixed
-        eigenvector construction.
-    graded_ls
-        A_BOX-independent block-by-block continuation of Sx in the bi-graded
-        Courant-Snyder/Fischer representation.
-    cesaro
-        A_BOX-independent mean-ergodic average of repeated polynomial-map
-        action on the exact Courant-Snyder seed Sx.
-    abel
-        A_BOX-independent Abel/resolvent average anchored to the exact Sx
-        quadratic block.
-    """
+    """Build one research state on the common full monomial basis."""
     method = str(invariant_construction).lower()
+    if method not in DEFAULT_METHOD_OPTIONS:
+        raise ValueError(f"Unknown invariant construction: {method!r}")
 
-    if method == "a_box":
-        state = initialize_nonlinear(
-            data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
-        )
-        state["invariant_construction"] = "a_box"
-        return state
+    settings = dict(DEFAULT_METHOD_OPTIONS[method])
+    if options:
+        settings.update(dict(options))
 
-    if method == "a_box_y0":
-        reduced_box = np.asarray(a_box, dtype=float).copy()
-        if reduced_box.shape != (5,):
-            raise ValueError("a_box_y0 expects A_BOX=[delta,x,y,px,py].")
-        reduced_box[2] = 0.0
-        reduced_box[4] = 0.0
-        state = initialize_nonlinear(
-            data, m, d, hamiltonian, reduced_box, variables, field_symbols, n=n
-        )
-        state["invariant_construction"] = "a_box_y0"
-        state["horizontal_slice_only"] = True
-        state["active_variables"] = ("delta", "x", "px")
-        return state
+    idx_to_vec, vec_to_idx = monomial_index_maps(m, d, n=n)
+    C = build_C(idx_to_vec, settings.get("C", "identity"), a_box=a_box)
+    G = build_G(
+        idx_to_vec,
+        C,
+        settings.get("G", "coefficient"),
+        a_box=a_box,
+    )
 
-    if method in {"eigen", "hybrid", "graded_ls", "cesaro", "abel"}:
-        # These methods all use the same unscaled physical monomial transfer.
-        # load_eigen() internally constructs that representation with unit
-        # scaling, so the numerical value of A_BOX does not enter their map.
-        state = initialize_nonlinear_eigen(
-            data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
-        )
-        state["invariant_construction"] = method
-        state["a_box_independent"] = method in {
-            "hybrid", "eigen", "graded_ls", "cesaro", "abel"
-        }
-        return state
+    order, H_vec_func = hamiltonian_data(
+        variables, hamiltonian, vec_to_idx, field_symbols
+    )
+    M_basis = build_M_basis(idx_to_vec, vec_to_idx, C, order, n=n)
 
-    raise ValueError(
-        "method must be one of: 'a_box', 'a_box_y0', 'hybrid', 'eigen', "
-        "'graded_ls', 'cesaro', 'abel'."
+    zero_fields = np.zeros(len(field_symbols), dtype=float)
+    octupole_fields = zero_fields.copy()
+    octupole_fields[3] = 1.0
+    h0 = np.asarray(H_vec_func(*zero_fields), dtype=float).reshape(-1)
+    h4 = np.asarray(H_vec_func(*octupole_fields), dtype=float).reshape(-1) - h0
+    M_octupole_unit = assemble_M(h4, M_basis)
+
+    q = quadratic_size(n)
+    state = {
+        "m": int(m),
+        "d": int(d),
+        "n": int(n),
+        "variables": tuple(variables),
+        "field_symbols": tuple(field_symbols),
+        "hamiltonian": sp.expand(hamiltonian),
+        "idx_to_vec": idx_to_vec,
+        "vec_to_idx": vec_to_idx,
+        "monomial_basis": build_monomial_basis(variables, idx_to_vec),
+        "C": C,
+        "G": G,
+        "Gqq": G[:q, :q],
+        "Gnn": G[q:, q:],
+        "quad_size": q,
+        "nonquad_size": len(idx_to_vec) - q,
+        "H_vec_func": H_vec_func,
+        "M_basis": M_basis,
+        "M_octupole_unit": M_octupole_unit,
+        "linear_cs0": np.asarray(lin.linear_data(data, "CS0"), dtype=float).copy(),
+        "a_box": np.asarray(a_box, dtype=float).copy(),
+        "invariant_construction": method,
+        "horizontal_only": bool(settings.get("horizontal_only", False)),
+        "method_options": settings,
+    }
+    state["D_x"] = build_derivative_matrix(state, 1)
+    state["D_y"] = build_derivative_matrix(state, 2)
+    state["D_px"] = build_derivative_matrix(state, 3)
+    state["D_py"] = build_derivative_matrix(state, 4)
+    return state
+
+
+def initialize_nonlinear(data, m, d, hamiltonian, a_box, variables, field_symbols, n=2):
+    """Compatibility wrapper for the a_box representation."""
+    return initialize_nonlinear_for_method(
+        data, m, d, hamiltonian, a_box, variables, field_symbols,
+        n=n, invariant_construction="a_box"
     )
 
 
-def quadratic_invariants(data, state):
-    """Embed the linear Courant-Snyder invariants in the quadratic basis.
+def initialize_nonlinear_eigen(data, m, d, hamiltonian, a_box, variables, field_symbols, n=2):
+    """Compatibility wrapper for the unscaled eigen representation."""
+    return initialize_nonlinear_for_method(
+        data, m, d, hamiltonian, a_box, variables, field_symbols,
+        n=n, invariant_construction="eigen"
+    )
 
-    Horizontal:
-        Sx = gamma_x x^2 + 2 alpha_x x px + beta_x px^2
 
-    Vertical is analogous. Division by C converts physical polynomial
-    coefficients into FANQO's stored coefficient representation.
+def load(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
+    """Compatibility alias returning the full a_box state without linear optics.
+
+    New research code should use initialize_nonlinear_for_method.  This wrapper
+    uses a neutral linear CS vector only because older tests called load
+    directly.
     """
-    bx0, ax0, gx0, by0, ay0, gy0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
-    vec_to_idx = state["vec_to_idx"]
-    C = state["C"]
+    fake_data = [np.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0])]
+    return initialize_nonlinear_for_method(
+        fake_data, m, d, hamiltonian, a_box, variables, field_symbols,
+        n=n, invariant_construction="a_box"
+    )
+
+
+def load_eigen(m, d, hamiltonian, a_box, variables, field_symbols, n=2):
+    """Compatibility alias for the eigen representation."""
+    fake_data = [np.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0])]
+    return initialize_nonlinear_for_method(
+        fake_data, m, d, hamiltonian, a_box, variables, field_symbols,
+        n=n, invariant_construction="eigen"
+    )
+
+
+# =============================================================================
+# 5. COURANT-SNYDER SEED
+# =============================================================================
+
+def quadratic_invariants(data, state):
+    """Stored coefficient vectors for the physical Courant-Snyder invariants."""
+    bx, ax, gx, by, ay, gy = np.asarray(
+        lin.linear_data(data, "CS0"), dtype=float
+    )
+    v = state["vec_to_idx"]
+    C = np.asarray(state["C"], dtype=float)
     q = state["quad_size"]
 
-    idx_x2 = vec_to_idx[(0, 2, 0, 0, 0)]
-    idx_xpx = vec_to_idx[(0, 1, 0, 1, 0)]
-    idx_px2 = vec_to_idx[(0, 0, 0, 2, 0)]
     Sx = np.zeros(q, dtype=float)
-    Sx[idx_x2] = gx0 / C[idx_x2]
-    Sx[idx_xpx] = 2.0 * ax0 / C[idx_xpx]
-    Sx[idx_px2] = bx0 / C[idx_px2]
+    for powers, physical in (
+        ((0, 2, 0, 0, 0), gx),
+        ((0, 1, 0, 1, 0), 2.0 * ax),
+        ((0, 0, 0, 2, 0), bx),
+    ):
+        i = v[powers]
+        Sx[i] = physical / C[i]
 
-    if state.get("horizontal_slice_only", False):
-        return Sx, None
-
-    idx_y2 = vec_to_idx[(0, 0, 2, 0, 0)]
-    idx_ypy = vec_to_idx[(0, 0, 1, 0, 1)]
-    idx_py2 = vec_to_idx[(0, 0, 0, 0, 2)]
     Sy = np.zeros(q, dtype=float)
-    Sy[idx_y2] = gy0 / C[idx_y2]
-    Sy[idx_ypy] = 2.0 * ay0 / C[idx_ypy]
-    Sy[idx_py2] = by0 / C[idx_py2]
+    for powers, physical in (
+        ((0, 0, 2, 0, 0), gy),
+        ((0, 0, 1, 0, 1), 2.0 * ay),
+        ((0, 0, 0, 0, 2), by),
+    ):
+        i = v[powers]
+        Sy[i] = physical / C[i]
+
     return Sx, Sy
 
 
+def horizontal_nonquad_positions(state):
+    """Positions in the nonlinear block containing no y or py powers."""
+    q = state["quad_size"]
+    positions = []
+    for global_index in range(q, len(state["idx_to_vec"])):
+        powers = state["idx_to_vec"][global_index]
+        if int(powers[2]) == 0 and int(powers[4]) == 0:
+            positions.append(global_index - q)
+    return np.asarray(positions, dtype=int)
+
+
+# =============================================================================
+# 6. INVARIANT CONSTRUCTORS
+# =============================================================================
+
+def least_squares_ix(
+    tnn,
+    tnq,
+    Sx,
+    state,
+    tol=1e-14,
+    *,
+    weighted=True,
+    active_positions=None,
+):
+    """Fixed-Sx least squares, optionally restricted to a coefficient subspace."""
+    D = np.eye(state["nonquad_size"]) - np.asarray(tnn, dtype=float)
+    U = np.asarray(tnq, dtype=float) @ np.asarray(Sx, dtype=float)
+
+    if active_positions is None:
+        active = np.arange(state["nonquad_size"], dtype=int)
+    else:
+        active = np.asarray(active_positions, dtype=int)
+
+    Ds = D[np.ix_(active, active)]
+    Us = U[active]
+
+    if weighted:
+        Gs = np.asarray(state["Gnn"], dtype=float)[np.ix_(active, active)]
+        L = np.linalg.cholesky(Gs)
+        hs, _, rank, singular = np.linalg.lstsq(L.T @ Ds, L.T @ Us, rcond=tol)
+    else:
+        hs, _, rank, singular = np.linalg.lstsq(Ds, Us, rcond=tol)
+
+    h = np.zeros(state["nonquad_size"], dtype=float)
+    h[active] = hs
+    residual = U - D @ h
+
+    details = {
+        "weighted": bool(weighted),
+        "active_coefficients": int(len(active)),
+        "rank": int(rank),
+        "residual": float(np.linalg.norm(residual)),
+    }
+    if singular.size:
+        details["min_relative_singular"] = (
+            float(singular[-1] / singular[0]) if singular[0] > 0 else float("nan")
+        )
+    return np.concatenate((np.asarray(Sx, dtype=float), h)), details
+
 
 def _eigenvalue_cutoff(minimum_positive):
-    """Reproduce the adaptive eigenvalue window used in the reference implementation."""
     value = abs(float(minimum_positive))
     if 0.0 < value < 1.0e-12:
         return 1.0e-10
@@ -901,175 +697,70 @@ def _eigenvalue_cutoff(minimum_positive):
     return 1.0e-1
 
 
-def eigen_invariant(
-    transfer,
-    state,
-    *,
-    plane="x",
-    imag_tol=1.0e-12,
-):
-    """Construct a near-invariant eigenvector of the one-turn transfer.
-
-    The ideal invariant coefficient vector satisfies T c = c, equivalently
-    (T-I)c = 0. Numerically we diagonalize T-I, retain near-zero real positive
-    eigenvalues, normalize candidate quadratic blocks with
-
-        c_q2*c_p2 - (c_qp/2)^2 = 1,
-
-    and select the candidate with the implemented mixed-quadratic residual
-    criterion. The normalization removes the arbitrary eigenvector amplitude.
-
-    """
+def eigen_invariant(transfer, state, *, plane="x", imag_tol=1e-12):
+    """Near-fixed eigenvector of T, normalized by its quadratic determinant."""
     transfer = np.asarray(transfer, dtype=float)
-    size = len(state["idx_to_vec"])
-    if transfer.shape != (size, size):
-        raise ValueError("Transfer shape does not match the polynomial basis.")
+    v = state["vec_to_idx"]
 
-    plane = str(plane).lower()
-    vec_to_idx = state["vec_to_idx"]
     if plane == "x":
-        i_q2 = vec_to_idx[(0, 2, 0, 0, 0)]
-        i_qp = vec_to_idx[(0, 1, 0, 1, 0)]
-        i_p2 = vec_to_idx[(0, 0, 0, 2, 0)]
-    elif plane == "y":
-        i_q2 = vec_to_idx[(0, 0, 2, 0, 0)]
-        i_qp = vec_to_idx[(0, 0, 1, 0, 1)]
-        i_p2 = vec_to_idx[(0, 0, 0, 0, 2)]
+        iq2, iqp, ip2 = v[(0, 2, 0, 0, 0)], v[(0, 1, 0, 1, 0)], v[(0, 0, 0, 2, 0)]
     else:
-        raise ValueError("plane must be 'x' or 'y'.")
+        iq2, iqp, ip2 = v[(0, 0, 2, 0, 0)], v[(0, 0, 1, 0, 1)], v[(0, 0, 0, 0, 2)]
 
-    eigenvalues, eigenvectors = np.linalg.eig(
-        transfer - np.eye(size, dtype=float)
-    )
-    real_mask = np.abs(np.imag(eigenvalues)) <= float(imag_tol)
-    real_values = np.real(eigenvalues[real_mask])
-    positive = real_values[real_values > 0.0]
+    values, vectors = np.linalg.eig(transfer - np.eye(len(transfer)))
+    real = np.abs(np.imag(values)) <= imag_tol
+    positive = np.real(values[real])
+    positive = positive[positive > 0.0]
     if positive.size == 0:
-        raise ValueError(
-            "Eigen construction found no positive real eigenvalue of T-I."
-        )
+        raise ValueError("No positive real near-fixed eigenvalue was found.")
 
     cutoff = _eigenvalue_cutoff(np.min(positive))
-    candidate_indices = [
-        k for k, value in enumerate(eigenvalues)
-        if abs(float(np.imag(value))) <= float(imag_tol)
-        and 0.0 < float(np.real(value)) < cutoff
-    ]
-    if not candidate_indices:
-        raise ValueError(
-            "Eigen construction found no eigenvalue inside its adaptive window."
-        )
-
     candidates = []
-    for k in candidate_indices:
-        w = np.real(eigenvectors[:, k]).astype(float, copy=True)
-        determinant = w[i_q2] * w[i_p2] - (0.5 * w[i_qp]) ** 2
-        if not np.isfinite(determinant) or determinant <= 0.0:
+
+    for k, value in enumerate(values):
+        if abs(float(np.imag(value))) > imag_tol:
+            continue
+        if not 0.0 < float(np.real(value)) < cutoff:
             continue
 
-        sign = float(np.sign(w[i_p2]))
-        if sign == 0.0:
-            sign = 1.0
-        w *= sign / math.sqrt(determinant)
-
+        w = np.real(vectors[:, k]).astype(float)
+        determinant = w[iq2] * w[ip2] - (0.5 * w[iqp]) ** 2
+        if determinant <= 0.0 or not np.isfinite(determinant):
+            continue
+        sign = np.sign(w[ip2]) or 1.0
+        w *= float(sign) / math.sqrt(float(determinant))
         residual = transfer @ w - w
-        selection_residual = abs(float(residual[i_qp]))
-        if not np.isfinite(selection_residual):
-            continue
         candidates.append((
-            selection_residual,
-            abs(float(np.real(eigenvalues[k]))),
+            abs(float(residual[iqp])),
+            abs(float(np.real(value))),
             w,
         ))
 
     if not candidates:
-        raise ValueError(
-            "Eigen construction found no normalizable invariant."
-        )
+        raise ValueError("No normalizable near-fixed eigenvector was found.")
 
     candidates.sort(key=lambda item: (item[0], item[1]))
-    selection_residual, eigen_residual, invariant_vector = candidates[0]
-    return invariant_vector, {
-        "reference_selection_residual": float(selection_residual),
+    selection, eigen_residual, vector = candidates[0]
+    return vector, {
+        "selection_residual": float(selection),
         "eigenvalue_residual": float(eigen_residual),
-        "reference_candidate_count": int(len(candidates)),
-        "eigen_cutoff": float(cutoff),
+        "candidate_count": int(len(candidates)),
+        "cutoff": float(cutoff),
     }
 
 
-def least_squares_ix(tnn, tnq, Sx, state, tol=1e-14, *, weighted=True):
-    """Construct Ix with a fixed Courant-Snyder quadratic block.
-
-    weighted=True is the original a_box construction:
-
-        min_h ||(I-T_nn)h - T_nq Sx||_{G_nn}.
-
-    weighted=False is the hybrid construction in the unscaled physical
-    monomial basis used by eigen:
-
-        min_h ||(I-T_nn)h - T_nq Sx||_2.
-
-    The hybrid intentionally does not use G or a Cholesky factor.
-    """
-    D = np.eye(state["nonquad_size"], dtype=float) - np.asarray(tnn, dtype=float)
-    U = np.asarray(tnq, dtype=float) @ np.asarray(Sx, dtype=float)
-
-    if weighted:
-        Gnn = np.asarray(state["Gnn"], dtype=float)
-        Lg = np.linalg.cholesky(Gnn)
-        h, *_ = np.linalg.lstsq(Lg.T @ D, Lg.T @ U, rcond=tol)
-    else:
-        h, *_ = np.linalg.lstsq(D, U, rcond=tol)
-
-    residual = U - D @ h
-    details = {
-        "weighted": bool(weighted),
-        "euclidean_residual": float(np.linalg.norm(residual)),
-        "euclidean_rhs_norm": float(np.linalg.norm(U)),
-    }
-    if weighted:
-        Gnn = np.asarray(state["Gnn"], dtype=float)
-        details["G_residual"] = float(
-            np.sqrt(max(residual @ Gnn @ residual, 0.0))
-        )
-        details["G_rhs_norm"] = float(
-            np.sqrt(max(U @ Gnn @ U, 0.0))
-        )
-
-    return np.concatenate((np.asarray(Sx, dtype=float), h)), details
-
-
-
-def _polynomial_bidegree(exponents):
-    """Return (delta_degree, transverse_degree) for one basis monomial."""
-    powers = tuple(int(power) for power in exponents)
-    return int(powers[0]), int(sum(powers[1:]))
+def _polynomial_bidegree(powers):
+    return int(powers[0]), int(sum(int(p) for p in powers[1:]))
 
 
 def _grade_index_map(state):
-    """Return {(delta_degree, transverse_degree): coefficient_indices}.
-
-    FANQO's Hamiltonian never differentiates with respect to delta, so delta
-    degree cannot decrease.  Hamiltonian terms have total polynomial degree
-    >= 2, so total degree cannot decrease either.  Consequently the transfer
-    is block lower triangular when blocks are ordered by
-
-        (total_degree, delta_degree).
-
-    This is the ordering used by graded_ls.
-    """
     groups = {}
-    for index, exponents in state["idx_to_vec"].items():
-        block = _polynomial_bidegree(exponents)
-        groups.setdefault(block, []).append(int(index))
-    return {
-        block: np.asarray(indices, dtype=int)
-        for block, indices in groups.items()
-    }
+    for i, powers in state["idx_to_vec"].items():
+        groups.setdefault(_polynomial_bidegree(powers), []).append(int(i))
+    return {block: np.asarray(indices, dtype=int) for block, indices in groups.items()}
 
 
 def _graded_block_order(block):
-    """Topological order for the bi-graded triangular transfer."""
     delta_degree, transverse_degree = block
     return (
         int(delta_degree + transverse_degree),
@@ -1078,778 +769,285 @@ def _graded_block_order(block):
     )
 
 
+def _fischer_row_weights(state, indices):
+    """Compatibility helper: sqrt(alpha!) for transverse exponents."""
+    weights = []
+    for i in indices:
+        factorial = 1
+        for power in state["idx_to_vec"][int(i)][1:]:
+            factorial *= math.factorial(int(power))
+        weights.append(math.sqrt(float(factorial)))
+    return np.asarray(weights, dtype=float)
+
+
 def _cs_grade_coefficient_transform(state, indices):
-    """Map one bi-graded block to Courant-Snyder normalized coefficients.
-
-    The normalized canonical transverse coordinates are
-
-        x  = sqrt(beta_x) X
-        px = (P_X - alpha_x X) / sqrt(beta_x)
-
-        y  = sqrt(beta_y) Y
-        py = (P_Y - alpha_y Y) / sqrt(beta_y)
-
-    so the quadratic Courant-Snyder forms become
-
-        Sx = X^2 + P_X^2,
-        Sy = Y^2 + P_Y^2.
-
-    Delta is left unchanged.  Because the coordinate change is linear in the
-    transverse variables, it preserves both delta degree and transverse
-    degree, so it acts independently inside every (d_delta, r_perp) block.
-    """
+    """Compatibility research helper for a CS-normalized homogeneous block."""
     indices = np.asarray(indices, dtype=int)
-    exponents = [tuple(int(v) for v in state["idx_to_vec"][int(i)])
-                 for i in indices]
-    local_index = {powers: i for i, powers in enumerate(exponents)}
-
-    bx, ax, _, by, ay, _ = np.asarray(
-        state["linear_cs0"], dtype=float
-    )
-    if bx <= 0.0 or by <= 0.0:
-        raise ValueError(
-            "Courant-Snyder beta functions must be positive for graded_ls."
-        )
-
-    sbx = math.sqrt(float(bx))
-    sby = math.sqrt(float(by))
+    exponents = [tuple(state["idx_to_vec"][int(i)]) for i in indices]
+    lookup = {powers: i for i, powers in enumerate(exponents)}
+    bx, ax, _, by, ay, _ = np.asarray(state["linear_cs0"], dtype=float)
+    sbx, sby = math.sqrt(bx), math.sqrt(by)
     transform = np.zeros((len(indices), len(indices)), dtype=float)
 
     for column, powers in enumerate(exponents):
-        d_power, x_power, y_power, px_power, py_power = powers
-
-        for px_norm_power in range(px_power + 1):
-            x_from_px = px_power - px_norm_power
-            coeff_x = (
-                (sbx ** x_power)
-                * math.comb(px_power, px_norm_power)
-                * ((-float(ax)) ** x_from_px)
-                / (sbx ** px_power)
+        dd, xp, yp, pxp, pyp = map(int, powers)
+        for Pxp in range(pxp + 1):
+            xf = pxp - Pxp
+            cx = (
+                sbx ** xp * math.comb(pxp, Pxp) * (-ax) ** xf / sbx ** pxp
             )
-            X_power = x_power + x_from_px
-
-            for py_norm_power in range(py_power + 1):
-                y_from_py = py_power - py_norm_power
-                coeff_y = (
-                    (sby ** y_power)
-                    * math.comb(py_power, py_norm_power)
-                    * ((-float(ay)) ** y_from_py)
-                    / (sby ** py_power)
+            Xp = xp + xf
+            for Pyp in range(pyp + 1):
+                yf = pyp - Pyp
+                cy = (
+                    sby ** yp * math.comb(pyp, Pyp) * (-ay) ** yf / sby ** pyp
                 )
-                Y_power = y_power + y_from_py
-
-                normalized_powers = (
-                    d_power,
-                    X_power,
-                    Y_power,
-                    px_norm_power,
-                    py_norm_power,
-                )
-                row = local_index.get(normalized_powers)
-                if row is None:
-                    raise ValueError(
-                        "The bi-graded block is not closed under the "
-                        "Courant-Snyder coordinate transform."
-                    )
-                transform[row, column] += coeff_x * coeff_y
-
+                Yp = yp + yf
+                row = lookup[(dd, Xp, Yp, Pxp, Pyp)]
+                transform[row, column] += cx * cy
     return transform
 
 
-def _fischer_row_weights(state, indices):
-    """Return sqrt(alpha!) for the transverse Fischer metric.
-
-    In Courant-Snyder normalized coordinates z=(X,P_X,Y,P_Y),
-
-        <z^alpha, z^beta>_F = alpha! delta_(alpha,beta),
-
-    hence
-
-        ||p||_F^2 = sum_alpha alpha! |c_alpha|^2.
-
-    Delta is a separate grading label rather than part of the metric.  Within
-    each block the metric therefore depends only on factorials of the four
-    transverse monomial exponents.  No A_BOX, amplitude, Twiss function, or
-    fitted scale enters the metric itself.
-    """
-    weights = np.ones(len(indices), dtype=float)
-    for row, index in enumerate(np.asarray(indices, dtype=int)):
-        powers = state["idx_to_vec"][int(index)]
-        factorial_product = 1
-        for power in powers[1:]:
-            factorial_product *= math.factorial(int(power))
-        weights[row] = math.sqrt(float(factorial_product))
-    return weights
-
-
 def graded_least_squares_ix(transfer, data, state, tol=1e-14):
-    """Construct Ix block by block with the factorial Fischer metric.
+    """Bi-graded fixed-Sx solve.
 
-    The coefficient space is bi-graded by
-
-        (delta degree, transverse degree).
-
-    Blocks are traversed in the triangular order
-
-        (total degree, delta degree).
-
-    The delta=0 transverse blocks of degree 0 and 1 are fixed to zero and the
-    delta=0 quadratic block is fixed exactly to the horizontal
-    Courant-Snyder invariant Sx.  Every other reachable block is then solved
-    from the already-fixed lower blocks:
-
-        (I - T_bb)c_b = sum_(a<b) T_ba c_a.
-
-    Each block is first written in Courant-Snyder normalized transverse
-    coordinates and the residual is minimized with the Fischer norm
-
-        ||r||_F^2 = sum_alpha alpha! |r_alpha|^2.
-
-    Thus the metric itself depends only on factorials.  A_BOX never enters
-    this construction.
+    The default graded_ls state uses C='fischer'.  Therefore Euclidean least
+    squares inside each block is already the factorial Fischer metric in
+    physical monomial coefficients.
     """
-    transfer = np.asarray(transfer, dtype=float)
-    size = len(state["idx_to_vec"])
-    if transfer.shape != (size, size):
-        raise ValueError("Transfer shape does not match the polynomial basis.")
-
     groups = _grade_index_map(state)
     blocks = tuple(sorted(groups, key=_graded_block_order))
-    if not blocks:
-        raise ValueError("graded_ls found an empty polynomial basis.")
-
     Sx, _ = quadratic_invariants(data, state)
-    fixed_physical = np.zeros(size, dtype=float)
-    fixed_physical[: len(Sx)] = np.asarray(Sx, dtype=float)
 
-    transforms = {}
-    inverse_transforms = {}
-    coefficients_normalized = {}
-    fixed_blocks = {(0, 0), (0, 1), (0, 2)}
+    c = np.zeros(len(state["idx_to_vec"]), dtype=float)
+    c[: len(Sx)] = Sx
+    solved = []
+    details = []
 
-    for block in blocks:
-        indices = groups[block]
-        C = _cs_grade_coefficient_transform(state, indices)
-        transforms[block] = C
-        inverse_transforms[block] = np.linalg.inv(C)
-
-        if block in fixed_blocks:
-            coefficients_normalized[block] = C @ fixed_physical[indices]
-
-    invariant_physical = fixed_physical.copy()
-    solved_blocks = []
-    block_details = []
+    fixed = {(0, 0), (0, 1), (0, 2)}
 
     for block in blocks:
-        if block in fixed_blocks:
+        if block in fixed:
             continue
 
         rows = groups[block]
-        Cb = transforms[block]
-        Cb_inv = inverse_transforms[block]
-
-        Tbb_physical = transfer[np.ix_(rows, rows)]
-        Tbb_normalized = Cb @ Tbb_physical @ Cb_inv
-        D = np.eye(len(rows), dtype=float) - Tbb_normalized
-
+        Tbb = transfer[np.ix_(rows, rows)]
+        D = np.eye(len(rows)) - Tbb
         U = np.zeros(len(rows), dtype=float)
-        for previous_block in blocks:
-            if _graded_block_order(previous_block) >= _graded_block_order(block):
+
+        for previous in blocks:
+            if _graded_block_order(previous) >= _graded_block_order(block):
                 break
+            columns = groups[previous]
+            previous_c = c[columns]
+            if np.any(previous_c):
+                U += transfer[np.ix_(rows, columns)] @ previous_c
 
-            previous_coefficients = coefficients_normalized.get(previous_block)
-            if previous_coefficients is None or not np.any(previous_coefficients):
-                continue
-
-            columns = groups[previous_block]
-            Tba_physical = transfer[np.ix_(rows, columns)]
-            Tba_normalized = (
-                Cb
-                @ Tba_physical
-                @ inverse_transforms[previous_block]
-            )
-            U += Tba_normalized @ previous_coefficients
-
-        weights = _fischer_row_weights(state, rows)
-        weighted_D = weights[:, None] * D
-        weighted_U = weights * U
-
-        solution, _, rank, singular_values = np.linalg.lstsq(
-            weighted_D,
-            weighted_U,
-            rcond=tol,
-        )
-        coefficients_normalized[block] = solution
-        invariant_physical[rows] = Cb_inv @ solution
-        solved_blocks.append(block)
-
+        solution, _, rank, singular = np.linalg.lstsq(D, U, rcond=tol)
+        c[rows] = solution
+        solved.append(block)
         residual = U - D @ solution
-        fischer_residual = float(np.linalg.norm(weights * residual))
-        fischer_rhs = float(np.linalg.norm(weighted_U))
-
-        if singular_values.size and singular_values[0] > 0.0:
-            min_relative_singular = float(
-                singular_values[-1] / singular_values[0]
-            )
-        else:
-            min_relative_singular = float("nan")
-
-        delta_degree, transverse_degree = block
-        block_details.append({
-            "delta_degree": int(delta_degree),
-            "transverse_degree": int(transverse_degree),
-            "total_degree": int(delta_degree + transverse_degree),
+        details.append({
+            "delta_degree": int(block[0]),
+            "transverse_degree": int(block[1]),
             "size": int(len(rows)),
             "rank": int(rank),
-            "fischer_residual": fischer_residual,
-            "fischer_rhs_norm": fischer_rhs,
-            "relative_residual": (
-                fischer_residual / fischer_rhs
-                if fischer_rhs > 0.0 else 0.0
+            "residual": float(np.linalg.norm(residual)),
+            "min_relative_singular": (
+                float(singular[-1] / singular[0])
+                if singular.size and singular[0] > 0 else float("nan")
             ),
-            "min_relative_singular": min_relative_singular,
         })
 
-    q = len(Sx)
-    if not np.array_equal(
-        invariant_physical[:q],
-        fixed_physical[:q],
-    ):
-        raise AssertionError("graded_ls changed the fixed Courant-Snyder block.")
-
-    solved_total_degrees = tuple(sorted({
-        int(delta_degree + transverse_degree)
-        for delta_degree, transverse_degree in solved_blocks
-    }))
-
-    return invariant_physical, {
-        "method": "graded_ls",
-        "a_box_independent": True,
+    return c, {
         "fixed_quadratic": "Sx",
+        "metric": "Fischer through C",
         "grading": "(delta_degree, transverse_degree)",
-        "block_order": "(total_degree, delta_degree)",
-        "coordinate_system": "Courant-Snyder normalized transverse coordinates",
-        "metric": "Fischer factorial metric: alpha!",
-        "solved_grades": solved_total_degrees,
-        "solved_blocks": tuple(
-            (int(delta_degree), int(transverse_degree))
-            for delta_degree, transverse_degree in solved_blocks
-        ),
-        "grade_details": tuple(block_details),
+        "solved_blocks": tuple(solved),
+        "solved_grades": tuple(sorted({a + b for a, b in solved})),
+        "grade_details": tuple(details),
     }
 
 
-
 def cesaro_invariant(tnn, tnq, Sx, state, terms=64):
-    """Mean-ergodic average of the map orbit of the Courant-Snyder seed.
-
-    With c_0 = (Sx, 0), define
-
-        c_N = (1/N) sum_(k=0)^(N-1) T^k c_0.
-
-    Because the polynomial transfer is block lower triangular and Sx is fixed
-    by the quadratic linear dynamics, only the nonlinear block must be
-    iterated:
-
-        h_(k+1) = T_nq Sx + T_nn h_k,   h_0 = 0.
-
-    The returned invariant is exactly (Sx, mean_k h_k), so the physically
-    important Courant-Snyder quadratic part is never altered numerically.
-    """
+    """Cesaro average of the map orbit of the fixed Courant-Snyder seed."""
     terms = int(terms)
-    if terms < 1:
-        raise ValueError("Cesaro averaging requires terms >= 1.")
-
-    tnn = np.asarray(tnn, dtype=float)
-    tnq = np.asarray(tnq, dtype=float)
-    Sx = np.asarray(Sx, dtype=float)
-    n = int(state["nonquad_size"])
-    if tnn.shape != (n, n):
-        raise ValueError("T_nn shape does not match the nonlinear basis.")
-    if tnq.shape != (n, len(Sx)):
-        raise ValueError("T_nq shape does not match the quadratic block.")
-
-    forcing = tnq @ Sx
-    h = np.zeros(n, dtype=float)
-    h_sum = np.zeros(n, dtype=float)
+    forcing = np.asarray(tnq) @ np.asarray(Sx)
+    h = np.zeros(state["nonquad_size"], dtype=float)
+    total = np.zeros_like(h)
 
     for _ in range(terms):
-        h_sum += h
-        h = forcing + tnn @ h
+        total += h
+        h = forcing + np.asarray(tnn) @ h
         if not np.all(np.isfinite(h)):
-            raise FloatingPointError(
-                "Cesaro map iterates became non-finite before averaging finished."
-            )
+            raise FloatingPointError("Cesaro iterates became non-finite.")
 
-    h_mean = h_sum / float(terms)
-    residual = forcing + tnn @ h_mean - h_mean
-
-    # Mean-ergodic identity:
-    #   T c_N - c_N = (T^N c_0 - c_0)/N.
-    endpoint_residual = h / float(terms)
-
-    return np.concatenate((Sx, h_mean)), {
-        "method": "cesaro",
-        "a_box_independent": True,
+    mean = total / float(terms)
+    residual = forcing + np.asarray(tnn) @ mean - mean
+    return np.concatenate((Sx, mean)), {
         "fixed_quadratic": "Sx",
         "terms": terms,
-        "nonlinear_residual": float(np.linalg.norm(residual)),
-        "endpoint_identity_residual": float(np.linalg.norm(endpoint_residual)),
-        "residual_identity_error": float(
-            np.linalg.norm(residual - endpoint_residual)
-        ),
+        "residual": float(np.linalg.norm(residual)),
     }
 
 
 def abel_invariant(tnn, tnq, Sx, state, rho=0.98, tol=1e-14):
-    """Abel/resolvent average of the map orbit of the Courant-Snyder seed.
-
-    The Abel average is
-
-        c_rho = (1-rho) sum_(k>=0) rho^k T^k c_0
-              = (1-rho) (I-rho T)^(-1) c_0,
-
-    with c_0=(Sx,0) and 0<rho<1.
-
-    Holding the quadratic block exactly equal to Sx reduces the construction to
-
-        (I-rho T_nn) h = rho T_nq Sx.
-
-    This is the exact nonlinear block of the Abel average and avoids changing
-    the Courant-Snyder part through finite-precision full-matrix solves.
-    """
+    """Abel/resolvent average with the Courant-Snyder block kept exact."""
     rho = float(rho)
-    if not 0.0 < rho < 1.0:
-        raise ValueError("Abel averaging requires 0 < rho < 1.")
-
-    tnn = np.asarray(tnn, dtype=float)
-    tnq = np.asarray(tnq, dtype=float)
-    Sx = np.asarray(Sx, dtype=float)
-    n = int(state["nonquad_size"])
-    if tnn.shape != (n, n):
-        raise ValueError("T_nn shape does not match the nonlinear basis.")
-    if tnq.shape != (n, len(Sx)):
-        raise ValueError("T_nq shape does not match the quadratic block.")
-
-    forcing = tnq @ Sx
-    A = np.eye(n, dtype=float) - rho * tnn
+    forcing = np.asarray(tnq) @ np.asarray(Sx)
+    A = np.eye(state["nonquad_size"]) - rho * np.asarray(tnn)
     b = rho * forcing
 
-    solver = "solve"
     try:
         h = np.linalg.solve(A, b)
-        rank = n
-        singular_values = np.array([], dtype=float)
+        solver = "solve"
     except np.linalg.LinAlgError:
+        h, _, _, _ = np.linalg.lstsq(A, b, rcond=tol)
         solver = "lstsq"
-        h, _, rank, singular_values = np.linalg.lstsq(A, b, rcond=tol)
 
-    if not np.all(np.isfinite(h)):
-        raise FloatingPointError("Abel invariant contains non-finite coefficients.")
-
-    resolvent_residual = A @ h - b
-    invariance_residual = forcing + tnn @ h - h
-
-    # From h-rho(T_nn h + forcing)=0:
-    #   T c_rho - c_rho = ((1-rho)/rho) (c_rho-c_0)
-    # on the nonlinear block.
-    predicted = ((1.0 - rho) / rho) * h
-
-    details = {
-        "method": "abel",
-        "a_box_independent": True,
+    return np.concatenate((Sx, h)), {
         "fixed_quadratic": "Sx",
         "rho": rho,
         "solver": solver,
-        "rank": int(rank),
-        "resolvent_residual": float(np.linalg.norm(resolvent_residual)),
-        "nonlinear_residual": float(np.linalg.norm(invariance_residual)),
-        "residual_identity_error": float(
-            np.linalg.norm(invariance_residual - predicted)
-        ),
+        "residual": float(np.linalg.norm(A @ h - b)),
     }
-    if singular_values.size:
-        details["min_relative_singular"] = (
-            float(singular_values[-1] / singular_values[0])
-            if singular_values[0] > 0.0 else float("nan")
-        )
 
-    return np.concatenate((Sx, h)), details
+
+def construct_a_box(transfer, tnn, tnq, data, state, tol):
+    Sx, _ = quadratic_invariants(data, state)
+    return least_squares_ix(tnn, tnq, Sx, state, tol=tol, weighted=True)
+
+
+def construct_a_box_y0(transfer, tnn, tnq, data, state, tol):
+    Sx, _ = quadratic_invariants(data, state)
+    return least_squares_ix(
+        tnn,
+        tnq,
+        Sx,
+        state,
+        tol=tol,
+        weighted=True,
+        active_positions=horizontal_nonquad_positions(state),
+    )
+
+
+def construct_hybrid(transfer, tnn, tnq, data, state, tol):
+    Sx, _ = quadratic_invariants(data, state)
+    return least_squares_ix(tnn, tnq, Sx, state, tol=tol, weighted=False)
+
+
+def construct_eigen(transfer, tnn, tnq, data, state, tol):
+    return eigen_invariant(transfer, state, plane="x")
+
+
+def construct_graded_ls(transfer, tnn, tnq, data, state, tol):
+    return graded_least_squares_ix(transfer, data, state, tol=tol)
+
+
+def construct_cesaro(transfer, tnn, tnq, data, state, tol):
+    Sx, _ = quadratic_invariants(data, state)
+    return cesaro_invariant(
+        tnn, tnq, Sx, state, terms=int(state.get("cesaro_terms", 64))
+    )
+
+
+def construct_abel(transfer, tnn, tnq, data, state, tol):
+    Sx, _ = quadratic_invariants(data, state)
+    return abel_invariant(
+        tnn, tnq, Sx, state,
+        rho=float(state.get("abel_rho", 0.98)),
+        tol=tol,
+    )
+
+
+CONSTRUCTORS = {
+    "a_box": construct_a_box,
+    "hybrid": construct_hybrid,
+    "eigen": construct_eigen,
+    "graded_ls": construct_graded_ls,
+    "cesaro": construct_cesaro,
+    "abel": construct_abel,
+    "a_box_y0": construct_a_box_y0,
+}
 
 
 def construct_ix(lattice, data, state, tol=1e-14, cache=True):
-    """Construct the horizontal invariant with the method stored in state."""
+    """Construct Ix with the research constructor selected in state."""
     transfer, tnn, tnq = nonlinear_transfer(
         lattice, state, tol=tol, cache=cache
     )
-    method = str(state.get("invariant_construction", "a_box")).lower()
+    method = state["invariant_construction"]
+    constructor = CONSTRUCTORS[method]
+    Ix, details = constructor(transfer, tnn, tnq, data, state, tol)
+    details = {"method": method, **dict(details)}
+    return np.asarray(Ix, dtype=float), details, transfer
 
-    if method == "eigen":
-        Ix, details = eigen_invariant(transfer, state, plane="x")
-        details = {"method": "eigen", **details}
-        return Ix, details, transfer
 
-    if method == "graded_ls":
-        Ix, details = graded_least_squares_ix(
-            transfer, data, state, tol=tol
-        )
-        return Ix, details, transfer
+# =============================================================================
+# 7. EVALUATION
+# =============================================================================
 
-    Sx, _ = quadratic_invariants(data, state)
+def physical_coefficients(coefficients, state):
+    return np.asarray(coefficients, dtype=float) * np.asarray(state["C"], dtype=float)
 
-    if method == "cesaro":
-        Ix, details = cesaro_invariant(
-            tnn, tnq, Sx, state,
-            terms=int(state.get("cesaro_terms", 64)),
-        )
-        return Ix, details, transfer
 
-    if method == "abel":
-        Ix, details = abel_invariant(
-            tnn, tnq, Sx, state,
-            rho=float(state.get("abel_rho", 0.98)),
-            tol=tol,
-        )
-        return Ix, details, transfer
-    if method in {"a_box", "a_box_y0"}:
-        Ix, details = least_squares_ix(
-            tnn, tnq, Sx, state, tol=tol, weighted=True
-        )
-    elif method == "hybrid":
-        Ix, details = least_squares_ix(
-            tnn, tnq, Sx, state, tol=tol, weighted=False
-        )
-    else:
-        raise ValueError(f"Unknown invariant construction: {method!r}")
+def evaluate_physical_coefficients(coefficients, idx_to_vec, coordinates):
+    """Evaluate physical polynomial coefficients on AT-order coordinates.
 
-    details.update({
-        "method": method,
-        "horizontal_slice_only": bool(
-            state.get("horizontal_slice_only", False)
-        ),
-    })
-    return Ix, details, transfer
+    coordinates has first dimension [x,px,y,py,delta,ct].
+    """
+    z = np.asarray(coordinates, dtype=float)
+    values = (
+        z[4],
+        z[0],
+        z[2],
+        z[1],
+        z[3],
+    )
+    out = np.zeros(np.broadcast_shapes(*(np.asarray(v).shape for v in values)))
+    values = tuple(np.broadcast_to(v, out.shape) for v in values)
+
+    for coefficient, powers in zip(coefficients, idx_to_vec.values()):
+        if coefficient == 0.0:
+            continue
+        term = float(coefficient)
+        for value, power in zip(values, powers):
+            if power:
+                term = term * value ** int(power)
+        out = out + term
+    return out
+
+
+def evaluate_invariant(Ix, state, coordinates):
+    """Evaluate an invariant coefficient vector on AT-order coordinates."""
+    return evaluate_physical_coefficients(
+        physical_coefficients(Ix, state),
+        state["idx_to_vec"],
+        coordinates,
+    )
 
 
 def eval_plane(I, state, Q, P, plane="x", delta0=0.0, frozen_q0=0.0, frozen_p0=0.0):
-    """Evaluate an invariant on an x-px or y-py transverse section.
+    """Compatibility helper for two-dimensional invariant sections."""
+    Q = np.asarray(Q, dtype=float)
+    P = np.asarray(P, dtype=float)
+    shape = np.broadcast_shapes(Q.shape, P.shape)
+    Q, P = np.broadcast_to(Q, shape), np.broadcast_to(P, shape)
+    coordinates = np.zeros((6,) + shape, dtype=float)
+    coordinates[4] = float(delta0)
 
-    Parameters
-    ----------
-    I : array-like
-        Invariant coefficient vector.
-    state : dict
-        Nonlinear state returned by initialize_nonlinear().
-    Q, P : array-like
-        Coordinates of the active plotting plane.
-    plane : {"x", "y"}
-        Active plane. For "x", the variables are (x, px) and the frozen plane
-        is (y, py). For "y", the variables are (y, py) and the frozen plane
-        is (x, px).
-    delta0 : float, optional
-        Fixed delta value.
-    frozen_q0 : float, optional
-        Fixed coordinate of the inactive transverse plane (y for plane="x",
-        x for plane="y").
-    frozen_p0 : float, optional
-        Fixed momentum of the inactive transverse plane (py for plane="x",
-        px for plane="y").
-    """
-    plane = plane.lower()
-    if plane == "x":
-        q, p = 1, 3
-        frozen_q, frozen_p = 2, 4
-    elif plane == "y":
-        q, p = 2, 4
-        frozen_q, frozen_p = 1, 3
+    if plane.lower() == "x":
+        coordinates[0], coordinates[1] = Q, P
+        coordinates[2], coordinates[3] = float(frozen_q0), float(frozen_p0)
+    elif plane.lower() == "y":
+        coordinates[2], coordinates[3] = Q, P
+        coordinates[0], coordinates[1] = float(frozen_q0), float(frozen_p0)
     else:
         raise ValueError("plane must be 'x' or 'y'.")
 
-    Z = np.zeros_like(Q, dtype=float)
-    idx_to_vec = state["idx_to_vec"]
-    eps = state["C"]
-
-    for k, c in enumerate(I):
-        if c == 0:
-            continue
-
-        v = idx_to_vec[k]
-        term = float(c) * float(eps[k])
-
-        if v[0] != 0:
-            term *= delta0 ** v[0]
-        if term == 0:
-            continue
-
-        if v[frozen_q] != 0:
-            term *= frozen_q0 ** v[frozen_q]
-        if term == 0:
-            continue
-
-        if v[frozen_p] != 0:
-            term *= frozen_p0 ** v[frozen_p]
-        if term == 0:
-            continue
-
-        if v[q] != 0:
-            term *= Q ** v[q]
-        if v[p] != 0:
-            term *= P ** v[p]
-        Z += term
-
-    return Z
+    return evaluate_invariant(I, state, coordinates)
 
 
-def _format_value_for_filename(value):
-    """Compact, filename-safe formatting for floating values."""
-    s = f"{float(value):.6g}"
-    s = s.replace("+", "")
-    s = s.replace("-", "m")
-    s = s.replace(".", "p")
-    return s
-
-
-def plot_invariant_section(
-    Ix,
-    Iy,
-    state,
-    plane="both",
-    levels=25,
-    grid_points=350,
-    rmin=0.06,
-    rmax=0.95,
-    delta0=0.0,
-    folder="nonlinear_plots",
-    x_max=5e-3,
-    px_max=1e-3,
-    y_max=2e-3,
-    py_max=1e-3,
-    frozen_q0=0.0,
-    frozen_p0=0.0,
-    save=True,
-    show=False,
-):
-    """Save invariant contour plots and return the generated paths/data.
-
-    For plane="x", the plot is in (x, px) with fixed (y, py) =
-    (frozen_q0, frozen_p0).
-    For plane="y", the plot is in (y, py) with fixed (x, px) =
-    (frozen_q0, frozen_p0).
-    """
-    plane = plane.lower()
-    if state.get("horizontal_slice_only", False):
-        if plane in {"y", "both"}:
-            raise ValueError(
-                "A_BOX[2]=0 activates horizontal-only LS mode; Iy/y-plane plots "
-                "are not defined."
-            )
-        if abs(float(frozen_q0)) > 0.0 or abs(float(frozen_p0)) > 0.0:
-            raise ValueError(
-                "Horizontal-only LS mode is defined on y=py=0; use "
-                "frozen_q0=0 and frozen_p0=0."
-            )
-
-    if plane == "both":
-        return {
-            "x": plot_invariant_section(
-                Ix, Iy, state, "x", levels, grid_points, rmin, rmax, delta0,
-                folder, x_max, px_max, y_max, py_max, frozen_q0, frozen_p0, save, show,
-            ),
-            "y": plot_invariant_section(
-                Ix, Iy, state, "y", levels, grid_points, rmin, rmax, delta0,
-                folder, x_max, px_max, y_max, py_max, frozen_q0, frozen_p0, save, show,
-            ),
-        }
-
-    if plane == "x":
-        I = Ix
-        qmax, pmax = x_max, px_max
-        qlab, plab = "x", "px"
-        title = f"Ix on y={frozen_q0:g}, py={frozen_p0:g}, delta={delta0:g}"
-        frozen_name_q, frozen_name_p = "y", "py"
-    elif plane == "y":
-        I = Iy
-        qmax, pmax = y_max, py_max
-        qlab, plab = "y", "py"
-        title = f"Iy on x={frozen_q0:g}, px={frozen_p0:g}, delta={delta0:g}"
-        frozen_name_q, frozen_name_p = "x", "px"
-    else:
-        raise ValueError("plane must be 'x', 'y', or 'both'.")
-
-    qvals = np.linspace(-qmax, qmax, grid_points)
-    pvals = np.linspace(-pmax, pmax, grid_points)
-    Q, P = np.meshgrid(qvals, pvals, indexing="xy")
-    Z = eval_plane(I, state, Q, P, plane, delta0, frozen_q0, frozen_p0)
-
-    if isinstance(levels, int):
-        level_count = 2 * levels
-        theta = np.linspace(0.0, 2.0 * np.pi, 300, endpoint=False)
-        radii = np.linspace(rmin, rmax, level_count)
-        lev = []
-        for r in radii:
-            Qr = r * qmax * np.cos(theta)
-            Pr = r * pmax * np.sin(theta)
-            vals = eval_plane(I, state, Qr, Pr, plane, delta0, frozen_q0, frozen_p0)
-            vals = vals[np.isfinite(vals)]
-            if len(vals):
-                lev.append(float(np.median(vals)))
-        lev = np.unique(np.round(np.sort(np.asarray(lev)), 14))
-        zmin, zmax = np.nanmin(Z), np.nanmax(Z)
-        lev = lev[(lev > zmin) & (lev < zmax)]
-        if len(lev) < 2:
-            lev = np.linspace(zmin, zmax, level_count + 2)[1:-1]
-    else:
-        lev = np.asarray(levels, dtype=float)
-
-    path = None
-    if save:
-        os.makedirs(folder, exist_ok=True)
-        filename = (
-            datetime.now().strftime("%Y%m%d_%H%M%S_")
-            + f"invariant_section_{plane}_"
-            + f"{frozen_name_q}_{_format_value_for_filename(frozen_q0)}_"
-            + f"{frozen_name_p}_{_format_value_for_filename(frozen_p0)}_"
-            + f"delta_{_format_value_for_filename(delta0)}.png"
-        )
-        path = os.path.join(folder, filename)
-
-    if save or show:
-        plt = get_pyplot(show)
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.contour(Q, P, Z, levels=lev, linewidths=0.45)
-        ax.set_xlabel(qlab)
-        ax.set_ylabel(plab)
-        ax.set_title(title)
-        ax.set_xlim(-qmax, qmax)
-        ax.set_ylim(-pmax, pmax)
-        ax.grid(True)
-        fig.tight_layout()
-        if save:
-            fig.savefig(path, dpi=300, bbox_inches="tight")
-        if show:
-            plt.show()
-        plt.close(fig)
-    return Q, P, Z, lev, path
-
-
-def plot_invariant_slices(
-    Ix,
-    Iy,
-    state,
-    y_values=(0.0, 0.5e-1, 1e-1),
-    x_values=(0.0, 0.5e-1, 1e-1),
-    delta_values=(0.0, 0.005, 0.01),
-    frozen_momentum=0.0,
-    levels=25,
-    grid_points=350,
-    rmin=0.06,
-    rmax=0.95,
-    folder="nonlinear_plots",
-    x_max=5e-3,
-    px_max=1e-3,
-    y_max=2e-3,
-    py_max=1e-3,
-    save=True,
-    show=False,
-):
-    """Create a folder and save a batch of Ix/Iy section plots.
-
-    Generated plots
-    ---------------
-    - Ix on the x-px plane for each fixed y in y_values, with py fixed to 0.
-    - Iy on the y-py plane for each fixed x in x_values, with px fixed to 0.
-    - Each of the above for every delta in delta_values.
-
-    Returns
-    -------
-    dict
-        Dictionary with the output folder and saved plot metadata.
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_folder = os.path.join(folder, f"invariant_slices_{timestamp}")
-    if save:
-        os.makedirs(out_folder, exist_ok=True)
-
-    results = {
-        "folder": out_folder,
-        "Ix": {},
-        "Iy": {},
-    }
-
-    for delta0 in delta_values:
-        results["Ix"][delta0] = {}
-        for y0 in y_values:
-            results["Ix"][delta0][y0] = plot_invariant_section(
-                Ix,
-                Iy,
-                state,
-                plane="x",
-                levels=levels,
-                grid_points=grid_points,
-                rmin=rmin,
-                rmax=rmax,
-                delta0=delta0,
-                folder=out_folder,
-                x_max=x_max,
-                px_max=px_max,
-                y_max=y_max,
-                py_max=py_max,
-                frozen_q0=y0,
-                frozen_p0=frozen_momentum,
-                save=save,
-                show=show,
-            )
-
-        results["Iy"][delta0] = {}
-        for x0 in x_values:
-            results["Iy"][delta0][x0] = plot_invariant_section(
-                Ix,
-                Iy,
-                state,
-                plane="y",
-                levels=levels,
-                grid_points=grid_points,
-                rmin=rmin,
-                rmax=rmax,
-                delta0=delta0,
-                folder=out_folder,
-                x_max=x_max,
-                px_max=px_max,
-                y_max=y_max,
-                py_max=py_max,
-                frozen_q0=x0,
-                frozen_p0=frozen_momentum,
-                save=save,
-                show=show,
-            )
-
-    return results
-
-def check_nonlinear_state(state):
-    """Return basic internal consistency checks for a prepared nonlinear state."""
-    idx_to_vec = state["idx_to_vec"]
-    vec_to_idx = state["vec_to_idx"]
-    inverse_error = sum(vec_to_idx.get(tuple(v), -1) != i for i, v in idx_to_vec.items())
-    G = state["G"]
-    gram_symmetry = float(np.linalg.norm(G - G.T))
-    gram_min_eigenvalue = float(np.linalg.eigvalsh(G).min())
-    basis_shape_ok = all(M.shape == G.shape for M in state["M_basis"])
-    h_basis_match = len(state["order"]) == len(state["M_basis"])
-    return {
-        "index_inverse_errors": int(inverse_error),
-        "gram_symmetry_error": gram_symmetry,
-        "gram_min_eigenvalue": gram_min_eigenvalue,
-        "basis_shapes_ok": bool(basis_shape_ok),
-        "hamiltonian_basis_count_ok": bool(h_basis_match),
-    }
-
-
-def transfer_checks(transfer, state):
-    """Return block-structure checks for a completed nonlinear transfer matrix."""
-    q = state["quad_size"]
-    upper_right = transfer[:q, q:]
-    return {
-        "transfer_shape": tuple(transfer.shape),
-        "upper_right_norm": float(np.linalg.norm(upper_right)),
-        "transfer_finite": bool(np.all(np.isfinite(transfer))),
-    }
+def Non_linear_Transfer(lattice, H_vec, M_basis):
+    """Deprecated compatibility name."""
+    raise RuntimeError("Use nonlinear_transfer(lattice, state).")
