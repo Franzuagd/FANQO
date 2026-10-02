@@ -236,7 +236,15 @@ def _initial_row(xs_mm, y_mm, orbit, delta):
     return z
 
 
-def _cache_signature(config, lattice_cfg, context):
+def delta_label(delta):
+    """Filesystem-safe label for one momentum offset."""
+    value = float(delta)
+    sign = "p" if value >= 0.0 else "m"
+    text = f"{abs(value):.8g}".replace(".", "p")
+    return f"delta_{sign}{text}"
+
+
+def _cache_signature(config, lattice_cfg, context, delta):
     payload = {
         "cache_version": TRACKING_CACHE_VERSION,
         "parameters": _jsonable(context["parameters"]),
@@ -244,7 +252,7 @@ def _cache_signature(config, lattice_cfg, context):
         "coords_mm": list(map(float, config.TRACKING_COORDS_MM)),
         "steps": list(map(int, config.TRACKING_STEPS)),
         "turns": int(config.TRACKING_TURNS),
-        "delta": float(config.TRACKING_DELTA),
+        "delta": float(delta),
         "num_int_steps": int(config.TRACKING_NUM_INT_STEPS),
         "ring_cells": getattr(config, "TRACKING_PHYSICAL_RING_CELLS", None),
         "chromatic_correction": bool(config.CORRECT_CHROMATICITY),
@@ -421,10 +429,28 @@ def load_tracking(cache_directory):
     }
 
 
-def track(config, lattice_cfg, context, cache_directory, *, force=False):
-    """Track the configured physical grid once and cache every ring turn."""
+def track(
+    config,
+    lattice_cfg,
+    context,
+    cache_directory,
+    *,
+    force=False,
+    delta=None,
+):
+    """Track one configured momentum offset and cache every ring turn."""
     folder = Path(cache_directory).resolve()
-    signature, payload = _cache_signature(config, lattice_cfg, context)
+    effective_delta = (
+        float(config.TRACKING_DELTA)
+        if delta is None
+        else float(delta)
+    )
+    signature, payload = _cache_signature(
+        config,
+        lattice_cfg,
+        context,
+        effective_delta,
+    )
     metadata_path = folder / "metadata.json"
 
     if metadata_path.is_file() and not force:
@@ -446,7 +472,7 @@ def track(config, lattice_cfg, context, cache_directory, *, force=False):
     turns = int(config.TRACKING_TURNS)
     if turns < 2 or turns % 2:
         raise ValueError("TRACKING_TURNS must be a positive even integer.")
-    delta = float(config.TRACKING_DELTA)
+    delta = effective_delta
 
     X, Y = np.meshgrid(xs, ys)
     x_mm = X.reshape(-1)
