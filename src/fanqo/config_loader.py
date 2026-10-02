@@ -156,6 +156,20 @@ def validate_general_config(general_cfg):
         raise ValueError("TRACKING_STEPS must be [nx, ny].")
     if int(general_cfg.TRACKING_TURNS) < 1:
         raise ValueError("TRACKING_TURNS must be positive.")
+
+    deltas = getattr(
+        general_cfg,
+        "TRACKING_DELTAS",
+        (general_cfg.TRACKING_DELTA,),
+    )
+    try:
+        deltas = tuple(float(value) for value in deltas)
+    except TypeError as exc:
+        raise TypeError("TRACKING_DELTAS must be an iterable of numbers.") from exc
+    if not deltas:
+        raise ValueError("TRACKING_DELTAS cannot be empty.")
+    if any(not __import__("math").isfinite(value) for value in deltas):
+        raise ValueError("TRACKING_DELTAS entries must be finite.")
     return general_cfg
 
 
