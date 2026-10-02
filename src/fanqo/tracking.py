@@ -386,13 +386,23 @@ def invariance_metrics(
     folder = Path(tracking["directory"])
     method = str(result["method"])
     target = folder / f"invariance_{method}.npz"
-    signature = _coefficient_signature(result)
+    coefficient_signature = _coefficient_signature(result)
+    tracking_signature = str(tracking["metadata"].get("signature", ""))
+    evaluation_signature = hashlib.sha1(
+        (
+            coefficient_signature
+            + "|"
+            + tracking_signature
+            + "|"
+            + repr(float(floor_fraction))
+        ).encode()
+    ).hexdigest()
 
     if target.is_file() and not force:
-        cached = np.load(target, allow_pickle=False)
-        stored = str(cached["coefficient_signature"].item())
-        if stored == signature:
-            return {key: cached[key] for key in cached.files}
+        with np.load(target, allow_pickle=False) as cached:
+            stored = str(cached["evaluation_signature"].item())
+            if stored == evaluation_signature:
+                return {key: cached[key].copy() for key in cached.files}
 
     coordinates = tracking["coordinates"]
     completed = np.asarray(tracking["completed_turns"])
@@ -438,7 +448,8 @@ def invariance_metrics(
     np.savez(
         target,
         method=np.asarray(method),
-        coefficient_signature=np.asarray(signature),
+        coefficient_signature=np.asarray(coefficient_signature),
+        evaluation_signature=np.asarray(evaluation_signature),
         D=D,
         log10D=log10D,
         rms=rms,
@@ -448,7 +459,8 @@ def invariance_metrics(
     )
     return {
         "method": np.asarray(method),
-        "coefficient_signature": np.asarray(signature),
+        "coefficient_signature": np.asarray(coefficient_signature),
+        "evaluation_signature": np.asarray(evaluation_signature),
         "D": D,
         "log10D": log10D,
         "rms": rms,
