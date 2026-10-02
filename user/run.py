@@ -38,12 +38,19 @@ def main():
         selected.add(name1)
         selected.add(name2)
 
+    unknown = selected - set(fq.available_methods())
+    if unknown:
+        raise ValueError(f"Unknown invariant methods: {sorted(unknown)}")
+
     methods = tuple(name for name in fq.available_methods() if name in selected)
 
     fq.write_report(
         methods=methods,
+        invariance_plots=INVARIANCE_PLOTS,
         comparisons=COMPARISON_PLOTS,
         tracking=fq.tracking_directory(),
+        force_tracking=FORCE_TRACKING,
+        force_metrics=FORCE_METRICS,
     )
 
     for method in methods:
