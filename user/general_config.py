@@ -72,6 +72,8 @@ INVARIANT_OPTIONS = {
         "C": np.ones(5),
         "G": "coefficient",
     },
+    # C is a storage scaling here. The constructor still performs the explicit
+    # Courant-Snyder coordinate transform and factorial Fischer graded solve.
     "graded_ls": {
         "C": "fischer",
         "G": "coefficient",
