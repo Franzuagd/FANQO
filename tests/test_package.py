@@ -14,7 +14,13 @@ def test_public_api_is_invariant_only():
         "coefficients",
         "polynomial",
         "construction_details",
+        "track",
+        "load_tracking",
+        "invariance",
+        "plot_invariance",
+        "plot_comparison",
         "compare",
+        "write_report",
     )
     for name in public_functions:
         assert callable(getattr(fanqo, name))
