@@ -1,259 +1,104 @@
-# FANQO
+# FANQO — a_box vs eigen optimization experiment
 
-**FANQO — Franzua's Accelerator Nonlinear Quasi-Invariant Optimizer**
+This branch starts from `Development-0.3` / FANQO `0.3.0.dev0` and is
+deliberately narrow.  It tests whether the invariant construction used inside
+the magnet optimizer changes the final physical machine quality.
 
-Python research package for linear optics, nonlinear polynomial quasi-invariants,
-CMA-ES/Powell optimization, frequency-map analysis (FMA), and full-ring tracking
-of the horizontal invariant `Ix`.
+## Invariant constructions
 
-## Repository structure
-
-This repository contains the reusable FANQO library and a `user/` starter folder.
-The files under `user/` are templates that users copy to their own working directory
-and edit for their accelerator and run settings.
+Only the original two constructors are used:
 
 ```text
-.
-├── pyproject.toml
-├── README.md
-├── .gitignore
-├── src/
-│   └── fanqo/
-│       ├── __init__.py
-│       ├── api.py
-│       ├── a_box.py
-│       ├── config_loader.py
-│       ├── state.py
-│       └── core/
-│           ├── __init__.py
-│           ├── linear.py
-│           ├── nonlinear.py
-│           ├── objective_functions.py
-│           └── optimization.py
-├── tests/
-└── user/
-    ├── general_config.py
-    ├── lattice_config.py
-    └── run.py
+a_box
+eigen
 ```
 
-The local working directory used by a researcher normally contains files such as:
+`a_box` uses the fixed `A_BOX` from `user/general_config.py`.  There is no
+automatic or manual a_box calibration in this branch.
+
+## Optimization objectives
+
+The comparison runner uses exactly two objectives.
+
+### 1. h_reduction
+
+For the coefficient split
 
 ```text
-my_fanqo_experiment/
-├── general_config.py
-├── lattice_config.py
-└── run.py
+Ix = [quadratic block ; h]
 ```
 
-The files in `user/` are examples. Copy them outside the FANQO repository before
-editing them for a real experiment.
-
-## Install with Anaconda
-
-```bash
-conda create -n fanqo python=3.12 -y
-conda activate fanqo
-python -m pip install --upgrade pip
-```
-
-From a local clone of this repository:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-For FMA and Ix tracking with Accelerator Toolbox:
-
-```bash
-python -m pip install -e ".[tracking,dev]"
-```
-
-## Basic import
-
-```python
-import fanqo
-print(fanqo.__version__)
-```
-
-## Typical local workflow
-
-From a directory containing your own `general_config.py` and
-`lattice_config.py`:
-
-```python
-import fanqo as fq
-from fanqo.core.objective_functions import horizontal_invariant_shape
-
-fq.load("general_config.py")
-fq.status()
-
-fq.linear_summary()
-fq.plot_linear()
-fq.write_linear_report()
-
-fq.compute_invariants()
-fq.plot_invariant()
-fq.write_invariant_report()
-
-result = fq.optimize(horizontal_invariant_shape)
-```
-
-After `optimize()`, the optimized lattice and whichever invariant planes are enabled in `general_config.py` are the active in-memory state.
-
-
-## Invariant construction
-
-FANQO supports two invariant constructors selected in `general_config.py`:
-
-```python
-# Weighted least-squares continuation of the Courant-Snyder invariant.
-INVARIANT_CONSTRUCTION = "a_box"
-
-# Reference eigenvector construction: physical monomial coefficients, C=1,
-# M(H)f={H,f}, T=exp(+L M), then diagonalize T-I and select/normalize
-# the near-invariant eigenvector.
-# INVARIANT_CONSTRUCTION = "eigen"
-```
-
-Both methods preserve the same FANQO monomial indexing and return the same
-public `Ix` vector representation. Therefore objective choice is independent:
-
-```python
-from fanqo.core.objective_functions import (
-    horizontal_invariant_shape,
-    reference_fluctuation_index,
-)
-
-result = fq.optimize(horizontal_invariant_shape)
-# or:
-# result = fq.optimize(reference_fluctuation_index)
-```
-
-The four combinations of the two invariant constructors and the two objective
-functions are supported. `A_BOX_MODE="auto"` applies only to the `"a_box"`
-constructor.
-
-## Choosing a_box
-
-The user can keep a fixed normalization box:
-
-```python
-A_BOX_MODE = "fixed"
-A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3])
-```
-
-or ask FANQO to calibrate it once before the main magnet optimization:
-
-```python
-A_BOX_MODE = "auto"
-```
-
-In automatic mode FANQO performs one FMA-like physical tracking grid, keeps the complete survivor trajectories, proposes a seed `a_box` from their phase-space envelope, and runs a short CMA-ES search in `log(a_box)`. Every CMA candidate is scored using the same saved trajectories, so no extra particle tracking is performed. The winning `a_box` is then rebuilt once and remains fixed throughout the full magnet optimization.
-
-The same calibration can be requested manually at any time:
-
-```python
-result = fq.optimize_a_box()
-print(result["best_a_box"])
-print(result["best_score"])
-```
-
-## FMA and Ix tracking
-
-With the tracking extra installed:
-
-```python
-fq.compute_invariants()
-diagnostic = fq.run_fma()
-fq.write_tracking_report()
-```
-
-The invariant may be computed from one or several analysis cells. Tracking is
-performed on an inferred physical 360-degree ring, and Ix drift is measured once
-per completed full-ring turn.
-
-## Reports
-
-```python
-fq.write_linear_report()
-fq.write_invariant_report()
-fq.write_optimization_report()
-fq.write_tracking_report("start")
-fq.write_tracking_report("end")
-fq.write_full_report()
-```
-
-## Tests
-
-```bash
-python -m pip install -e ".[dev]"
-pytest -q
-```
-
-The repository tests check the installed public package interface. Full
-machine-specific numerical smoke tests should be run from the user's local
-working files.
-
-## Install directly from GitHub
-
-After replacing `USER` with the repository owner:
-
-```bash
-python -m pip install "git+https://github.com/USER/fanqo.git"
-```
-
-or, for an exact tagged release:
-
-```bash
-python -m pip install "git+https://github.com/USER/fanqo.git@v0.2.0"
-```
-
-## Plot display and saving
-
-The starter `general_config.py` separates saving figures from displaying them:
-
-```python
-SAVE_PLOTS = True
-SHOW_PLOTS = False
-```
-
-This mode saves all requested figures without opening GUI windows and uses a
-non-interactive Matplotlib backend, which is recommended for optimization, FMA,
-remote sessions, and long runs. Set `SHOW_PLOTS = True` when interactive windows
-are desired.
-
-
-## 48-hour validation campaign
-
-The complete objective/construction matrix can be run from the `user` folder:
-
-```bash
-python master_run_48h.py
-```
-
-The campaign uses the same truncated polynomial space (`m=6, d=1`) for both
-invariant constructions and evaluates nine optimization objectives with each
-construction, for 18 optimization cases total. It runs the original-lattice
-FMA once, calibrates `a_box` once, reloads the original lattice before every
-optimization case, and dynamically shares the remaining 48-hour wall-time
-budget among unfinished cases.
-
-Results are written under:
+the score is
 
 ```text
-user/master_48h_output/
-├── 00_baseline/
-├── 01_a_box_calibration/
-├── 02_constructor_baselines/
-├── runs/
-│   ├── a_box/
-│   └── eigen/
-├── campaign_state.json
-└── campaign_summary.csv
+J_h = sqrt(h^T G_nn h).
 ```
 
-The state file is written after every case. Rerunning the master file skips
-completed cases and continues an interrupted campaign. Delete
-`master_48h_output/campaign_state.json` (or the full output folder) to start a
-new 48-hour campaign from scratch.
+For `a_box` this is the usual nonlinear-tail reduction after the fixed
+Courant-Snyder block.  For `eigen` the same coefficient split is used, so its
+free quadratic normalization is not directly penalized.
+
+The raw value of `J_h` is representation-dependent.  It is an optimizer
+objective, not the final cross-method quality metric.
+
+### 2. advisor_derivative
+
+The runner maps this label to the existing
+`reference_fluctuation_index` from the 0.3.dev code.  It removes the pure
+delta=0 quadratic sector, forms sampled derivatives
+
+```text
+g = Ix_x^2 + Ix_y^2 + (w Ix_px)^2 + (w Ix_py)^2,
+```
+
+and scores each momentum slice from the mean, standard deviation, and skewness
+of `g`.  The worst configured delta slice is used.
+
+## Four-run protocol
+
+`user/run.py` always reloads `lattice_config.PARAMETERS` before each case:
+
+```text
+a_box + h_reduction
+eigen + h_reduction
+a_box + advisor_derivative
+eigen + advisor_derivative
+```
+
+Each case has an independent output directory under:
+
+```text
+user/optimization_compare/
+```
+
+The common scientific comparison is the physical start/end FMA and tracked-Ix
+diagnostics, not the absolute optimizer objective value.
+
+## Run
+
+```bash
+python -m pip install --upgrade --force-reinstall "git+https://github.com/Franzuagd/FANQO.git@IxOptCompare-0.3"
+cd user
+python run.py
+```
+
+Set `QUICK=True` in `user/run.py` only for a smoke test.  With
+`QUICK=False`, each of the four cases uses the optimizer budget from
+`general_config.py`.
+
+## Main research settings
+
+Edit `user/general_config.py` for:
+
+```text
+A_BOX
+VARY
+CMA_SIGMA
+CMA_POPSIZE
+CMA_TIME
+POWELL_TIME_FRACTION
+REFERENCE_OBJECTIVE_*
+FMA_*
+```
+
+The linear lattice implementation is unchanged from `Development-0.3`.
