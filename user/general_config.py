@@ -100,7 +100,17 @@ TRACKING_STEPS = [121, 121]
 
 # 512 turns = two 256-turn FMA windows and the full 512-turn Ix test.
 TRACKING_TURNS = 512
+
+# Momentum offsets to validate.  Use one or several values.
+# Examples:
+#   TRACKING_DELTAS = (0.0,)
+#   TRACKING_DELTAS = (0.005,)
+#   TRACKING_DELTAS = (0.0, 0.005, 0.01, -0.005)
+#
+# TRACKING_DELTA is kept for backward compatibility with older scripts.
 TRACKING_DELTA = 0.0
+TRACKING_DELTAS = (TRACKING_DELTA,)
+
 TRACKING_NUM_INT_STEPS = 10
 TRACKING_PHYSICAL_RING_CELLS = None
 TRACKING_POOL_SIZE = None
