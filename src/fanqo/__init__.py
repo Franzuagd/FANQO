@@ -1,4 +1,4 @@
-"""FANQO Ixcononly: invariant-construction research surface."""
+"""FANQO Ixcononly research surface."""
 
 from .api import (
     METHODS,
@@ -10,7 +10,14 @@ from .api import (
     coefficients,
     polynomial,
     construction_details,
+    tracking_directory,
+    track,
+    load_tracking,
+    invariance,
+    plot_invariance,
+    plot_comparison,
     compare,
+    write_report,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]
