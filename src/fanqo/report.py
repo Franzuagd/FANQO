@@ -23,7 +23,10 @@ def write_run_report(
     *,
     methods,
     comparisons,
+    invariance_plots=(),
     tracking_directory=None,
+    force_tracking=None,
+    force_metrics=None,
 ):
     """Write a compact record of what was selected for a run."""
     lines = [
@@ -38,7 +41,10 @@ def write_run_report(
         _line("least_squares_tol", float(config.LEAST_SQUARES_TOL)),
         _line("a_box", np.asarray(config.A_BOX, dtype=float).tolist()),
         _line("methods", tuple(methods)),
+        _line("invariance_plots", tuple(invariance_plots)),
         _line("comparisons", tuple(tuple(pair) for pair in comparisons)),
+        _line("force_tracking", force_tracking),
+        _line("force_metrics", force_metrics),
         _line("tracking_coords_mm", list(map(float, config.TRACKING_COORDS_MM))),
         _line("tracking_steps", list(map(int, config.TRACKING_STEPS))),
         _line("tracking_turns", int(config.TRACKING_TURNS)),
