@@ -30,7 +30,6 @@ from .api import (
     write_invariant_report,
     run_fma,
     plot_invariant_tracking,
-    optimize_a_box,
     write_tracking_report,
     optimize,
     save_current_lattice,
