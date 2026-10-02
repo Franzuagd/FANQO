@@ -201,29 +201,58 @@ def construction_details(method="a_box"):
     return dict(construct(method)["details"])
 
 
-def tracking_directory():
-    return tracking_module.default_cache_directory(_cfg(), _config_directory())
+def tracking_deltas():
+    """Momentum offsets selected for validation."""
+    cfg = _cfg()
+    values = getattr(cfg, "TRACKING_DELTAS", (cfg.TRACKING_DELTA,))
+    return tuple(float(value) for value in values)
 
 
-def track(*, force=False, cache_directory=None):
-    """Run the configured physical grid once, or reuse the existing cache."""
+def tracking_directory(delta=None):
+    """Cache directory for one momentum offset.
+
+    Passing no delta returns the common tracking-cache root.  Passing a delta
+    returns a dedicated subdirectory, so on- and off-momentum runs never
+    overwrite one another.
+    """
+    root = tracking_module.default_cache_directory(_cfg(), _config_directory())
+    if delta is None:
+        return root
+    return root / tracking_module.delta_label(float(delta))
+
+
+def track(*, force=False, cache_directory=None, delta=None):
+    """Track one momentum offset, or reuse its existing physical cache."""
+    cfg = _cfg()
+    effective_delta = (
+        float(cfg.TRACKING_DELTA)
+        if delta is None
+        else float(delta)
+    )
     folder = (
-        tracking_directory()
+        tracking_directory(effective_delta)
         if cache_directory is None
         else _resolve(cache_directory)
     )
     return tracking_module.track(
-        _cfg(),
+        cfg,
         STATE.lattice_config,
         _context(),
         folder,
         force=force,
+        delta=effective_delta,
     )
 
 
-def load_tracking(cache_directory=None):
+def load_tracking(cache_directory=None, *, delta=None):
+    cfg = _cfg()
+    effective_delta = (
+        float(cfg.TRACKING_DELTA)
+        if delta is None
+        else float(delta)
+    )
     folder = (
-        tracking_directory()
+        tracking_directory(effective_delta)
         if cache_directory is None
         else _resolve(cache_directory)
     )
@@ -262,8 +291,15 @@ def plot_invariance(
     data = _tracking_object(tracking)
     metrics = invariance(method, tracking=data, force=force_metrics)
     cfg = _cfg()
+    delta = float(data["metadata"]["tracking"]["delta"])
+    delta_name = tracking_module.delta_label(delta)
     if output_path is None:
-        output_path = _resolve(cfg.OUTPUT_DIRECTORY) / "invariance" / f"{method}.png"
+        output_path = (
+            _resolve(cfg.OUTPUT_DIRECTORY)
+            / delta_name
+            / "invariance"
+            / f"{method}.png"
+        )
     if show is None:
         show = bool(cfg.SHOW_PLOTS)
     return plotting.plot_invariance_map(
@@ -274,6 +310,7 @@ def plot_invariance(
         show=show,
         vmin=float(getattr(cfg, "IX_INVARIANCE_LOG_MIN", -14.0)),
         vmax=float(getattr(cfg, "IX_INVARIANCE_LOG_MAX", 0.0)),
+        delta=delta,
     )
 
 
@@ -293,9 +330,12 @@ def plot_comparison(
     metrics2 = invariance(method2, tracking=data, force=force_metrics)
 
     cfg = _cfg()
+    delta = float(data["metadata"]["tracking"]["delta"])
+    delta_name = tracking_module.delta_label(delta)
     if output_path is None:
         output_path = (
             _resolve(cfg.OUTPUT_DIRECTORY)
+            / delta_name
             / "comparisons"
             / f"{method1}_vs_{method2}.png"
         )
@@ -310,6 +350,7 @@ def plot_comparison(
         method2,
         output_path,
         show=show,
+        delta=delta,
     )
 
 
