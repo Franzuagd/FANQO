@@ -130,3 +130,42 @@ def test_bigraded_solver_handles_same_total_degree_delta_block():
     assert (1, 1) in details["solved_blocks"]
     assert details["grading"] == "(delta_degree, transverse_degree)"
     assert details["metric"] == "Fischer factorial metric: alpha!"
+
+
+def test_graded_ls_is_independent_of_storage_C():
+    idx_to_vec = {
+        0: [0, 0, 0, 0, 0],
+        1: [0, 1, 0, 0, 0],
+        2: [0, 0, 0, 1, 0],
+        3: [0, 2, 0, 0, 0],
+        4: [0, 1, 0, 1, 0],
+        5: [0, 0, 0, 2, 0],
+        6: [0, 3, 0, 0, 0],
+    }
+    scale = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    state = {
+        "idx_to_vec": idx_to_vec,
+        "vec_to_idx": {tuple(v): k for k, v in idx_to_vec.items()},
+        "linear_cs0": np.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0]),
+        "C": scale,
+        "quad_size": 6,
+        "nonquad_size": 1,
+    }
+
+    T_physical = np.eye(7)
+    T_physical[6, 6] = 0.5
+    T_physical[6, 3] = 0.2
+
+    # T_stored = C^{-1} T_physical C
+    T_stored = T_physical * scale[None, :] / scale[:, None]
+    data = [np.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0])]
+
+    Ix_stored, _ = nl.graded_least_squares_ix(
+        T_stored, data, state, tol=1e-14
+    )
+    Ix_physical = scale * Ix_stored
+
+    assert np.allclose(
+        Ix_physical,
+        np.array([0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.4]),
+    )
