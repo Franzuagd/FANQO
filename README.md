@@ -39,7 +39,8 @@ The defaults are visible in `user/general_config.py`:
 - `a_box`: C from A_BOX, G is the box L2 metric;
 - `a_box_y0`: same full basis and same C/G, but coefficients containing y or py are constrained to zero;
 - `hybrid`, `eigen`, `cesaro`, `abel`: C=(1,1,1,1,1), coefficient metric;
-- `graded_ls`: factorial/Fischer C, coefficient metric.
+- `graded_ls`: factorial storage C, followed by the explicit
+  Courant-Snyder-normalized factorial Fischer graded solve.
 
 The y0 method therefore still returns a full-length polynomial vector.  Its
 vertical and mixed coefficients are zero, so the resulting Ix is well-defined
@@ -72,12 +73,20 @@ ix_construction_output/tracking_cache/
 ```
 
 contains the turn-by-turn coordinates, survival data, and FMA tune/diffusion
-values.  The cache is reused when the lattice and tracking configuration have
-not changed.
+values.  The launch grid, 1 nm zero-avoidance offset, split-window frequency
+analysis, and Ix drift definition follow the working FANQO
+Development-0.3/main implementation.  FMA is post-processed from the same saved
+512-turn trajectories, so plotting additional invariants does not track the
+particles again.
 
-Invariant drift values are then computed from those saved trajectories and
-cached per method.  Creating additional invariant plots or pairwise comparison
-plots does not repeat the particle tracking.
+Invariant drift is the established FANQO quantity
+
+```text
+D = max_n |Ix(n)-Ix(0)| / (max(|Ix(0)|, floor) * n)
+```
+
+and the individual invariance map uses the fixed log10 range configured by
+`IX_INVARIANCE_LOG_MIN/MAX`.
 
 ## Plots
 
