@@ -196,7 +196,7 @@ def C_fischer(idx_to_vec):
 def build_C(idx_to_vec, specification="identity", *, a_box=None):
     """Build C from a named rule, a five-vector, a full vector, or a callable."""
     if callable(specification):
-        C = np.asarray(specification(idx_to_vec), dtype=float)
+        C = np.asarray(specification(idx_to_vec, a_box), dtype=float)
     elif isinstance(specification, str):
         key = specification.lower()
         if key in {"identity", "physical", "ones"}:
@@ -281,7 +281,7 @@ def build_G(idx_to_vec, C, specification="coefficient", *, a_box=None):
     the intended edit point for new research metrics.
     """
     if callable(specification):
-        G = np.asarray(specification(idx_to_vec, C), dtype=float)
+        G = np.asarray(specification(idx_to_vec, C, a_box), dtype=float)
     elif isinstance(specification, str):
         key = specification.lower()
         if key in {"coefficient", "identity", "euclidean"}:
