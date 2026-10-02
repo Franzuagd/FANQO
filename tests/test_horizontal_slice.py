@@ -45,3 +45,34 @@ def test_a_box_y0_uses_full_basis_and_horizontal_coefficient_mask():
         assert powers[4] == 0
 
     assert state["horizontal_only"] is True
+
+
+def test_horizontal_only_ls_keeps_full_residual_equations():
+    # D = I-Tnn. Only h0 is active, but both residual equations matter.
+    D = np.array([
+        [1.0, 0.0],
+        [1.0, 1.0],
+    ])
+    tnn = np.eye(2) - D
+    tnq = np.array([
+        [0.0],
+        [1.0],
+    ])
+    Sx = np.array([1.0])
+    state = {
+        "nonquad_size": 2,
+        "Gnn": np.eye(2),
+    }
+
+    Ix, _ = nl.least_squares_ix(
+        tnn,
+        tnq,
+        Sx,
+        state,
+        weighted=True,
+        active_positions=np.array([0]),
+    )
+
+    # min_h h^2 + (h-1)^2 gives h=1/2; inactive h1 remains exactly zero.
+    assert np.isclose(Ix[1], 0.5)
+    assert np.isclose(Ix[2], 0.0)
