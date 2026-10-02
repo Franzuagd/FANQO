@@ -28,3 +28,10 @@ def test_initial_row_keeps_at_one_nanometer_offset():
 
     assert np.isclose(z0[0, 0], 1.0e-9)
     assert np.isclose(z0[0, 2], 1.0e-9)
+
+
+def test_delta_labels_are_stable_and_distinct():
+    assert tracking.delta_label(0.0) == "delta_p0"
+    assert tracking.delta_label(0.005) == "delta_p0p005"
+    assert tracking.delta_label(-0.005) == "delta_m0p005"
+    assert tracking.delta_label(0.01) != tracking.delta_label(-0.01)
