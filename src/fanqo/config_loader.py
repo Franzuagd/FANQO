@@ -39,7 +39,6 @@ _REQUIRED_GENERAL_SETTINGS = (
     "TRACKING_DELTA",
     "IX_INVARIANCE_NORM_FLOOR_FRACTION",
     "OUTPUT_DIRECTORY",
-    "SAVE_PLOTS",
     "SHOW_PLOTS",
 )
 
@@ -148,7 +147,7 @@ def validate_general_config(general_cfg):
     if any(float(v) <= 0.0 for v in box):
         raise ValueError(
             "A_BOX entries must be positive on Ixcononly. "
-            "Use method='a_box_y0' for the exact y=py=0 construction."
+            "Use method='a_box_y0' for the horizontal-only coefficient construction."
         )
 
     if len(general_cfg.TRACKING_COORDS_MM) != 4:
