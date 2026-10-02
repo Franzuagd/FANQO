@@ -74,11 +74,8 @@ N_PLANES = 2
 INVARIANT_CONSTRUCTION = "a_box"
 
 # 7. NORMALIZATION / PHYSICAL BOX
-# "fixed": use A_BOX exactly as written below.
-# "auto" : before the main magnet optimization, run optimize_a_box() once.
-# A_BOX_MODE is used only when INVARIANT_CONSTRUCTION = "a_box".
-A_BOX_MODE = "fixed"
-
+# A_BOX is fixed for the full experiment. This branch deliberately does not
+# tune or optimize the box.
 # Physical half-widths in nonlinear variable order [delta, x, y, px, py].
 A_BOX = np.array(
     [0.01, 10e-3, 8.0e-3, 1.0e-3, 0.8e-3],
@@ -106,11 +103,16 @@ CACHE_REPEATED_MAGNET_MAPS = True
 # negligible. Normally false because checking it for every element is costly.
 CHECK_ELEMENT_UPPER_RIGHT = False
 
-# 10. OBJECTIVE
-# Parameters for horizontal_invariant_shape().
+# 10. OBJECTIVES
+# The comparison runner uses exactly two optimization objectives:
+#   h_reduction                -> normal nonlinear-tail ||h|| reduction
+#   reference_fluctuation_index -> advisor/reference sampled derivative metric
+#
+# GRADIENT_WEIGHT is retained only for compatibility with the original 0.3.dev
+# configuration validator; it is not used by the comparison runner.
 GRADIENT_WEIGHT = 0.10
 
-# Parameters for reference_fluctuation_index().
+# Parameters for the advisor/reference derivative objective.
 # These reproduce the active sampling choices in the reference implementation.
 REFERENCE_OBJECTIVE_X_RANGE = 2.5e-3
 REFERENCE_OBJECTIVE_X_POINTS = 21
@@ -237,48 +239,8 @@ POINCARE_LEAKAGE_MOMENTUM_TOL = 1.0e-5
 POINCARE_OUTPUT_DIRECTORY = Path("optimization_output") / "poincare"
 
 
-# 16. ONE-TIME A_BOX CALIBRATION
-# Used only when A_BOX_MODE = "auto", or whenever the user explicitly calls
-# fq.optimize_a_box(). The physical tracking is done once; CMA then reuses the
-# same saved survivor trajectories.
+# 16. OUTPUTS
 
-# FMA-like launch window in millimetres: [xmin, xmax, ymin, ymax].
-A_BOX_TRACKING_COORDS_MM = [
-    -1000.0 * float(A_BOX[1]),
-     1000.0 * float(A_BOX[1]),
-    -1000.0 * float(A_BOX[2]),
-     1000.0 * float(A_BOX[2]),
-]
-
-# _fma_grid creates nx+1 by ny+1 launch points.
-A_BOX_TRACKING_STEPS = [10, 10]
-A_BOX_TRACKING_TURNS = 128
-A_BOX_TRACKING_DELTA = 0.0
-
-# Build the initial proposed box from complete survivors only.
-# The 98th percentile avoids making one numerical outlier define the box.
-A_BOX_SEED_QUANTILE = 0.98
-A_BOX_SEED_MARGIN = 1.15
-A_BOX_SEED_MIN_FRACTION = 0.20
-
-# [delta, x, y, px, py]
-# delta stays fixed by default because a single on-momentum tracking set cannot
-# identify an optimal delta half-width.
-A_BOX_OPTIMIZE_MASK = [False, True, True, True, True]
-
-# Short CMA-ES refinement around the survivor-derived seed.
-# Search is performed in log(a_box), so all half-widths remain positive.
-A_BOX_CMA_SIGMA = 0.25
-A_BOX_CMA_POPSIZE = 6
-A_BOX_CMA_MAX_EVALS = 30
-A_BOX_CMA_FACTOR_BOUNDS = (0.5, 2.0)
-
-# Objective floor for relative Ix conservation along the saved trajectories.
-A_BOX_INVARIANCE_FLOOR_FRACTION = 1.0e-8
-A_BOX_OUTPUT_DIRECTORY = Path("optimization_output") / "a_box"
-
-
-# 17. OUTPUTS
 OUTPUT_ROOT = Path("optimization_output")
 REPORT_FILE = OUTPUT_ROOT / "optimization_report.txt"
 FINAL_LATTICE_FILE = OUTPUT_ROOT / "final_lattice.json"
