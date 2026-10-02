@@ -39,7 +39,6 @@ class RuntimeState:
 
     # Results kept after longer operations finish.
     optimization_result: dict | None = None
-    a_box_result: dict | None = None
     diagnostics: dict = field(default_factory=dict)
 
     # Human-readable origin of active parameters: unloaded/loaded/edited/optimized.
