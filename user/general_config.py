@@ -45,13 +45,13 @@ LEAST_SQUARES_TOL = 1.0e-16
 #   "fischer"    -> factorial scaling
 #   [cδ,cx,cy,cpx,cpy] -> coordinate scaling lifted to all monomials
 #   one number per monomial
-#   a callable(idx_to_vec) -> full C
+#   a callable(idx_to_vec, a_box) -> full C
 #
 # G may be:
 #   "box"        -> symmetric-box L2 metric using C and A_BOX
 #   "coefficient"-> Euclidean metric in the C-scaled basis
 #   "fischer"    -> Fischer metric for the current C
-#   a matrix or callable(idx_to_vec, C)
+#   a matrix or callable(idx_to_vec, C, a_box)
 A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
 
 INVARIANT_OPTIONS = {
@@ -107,5 +107,4 @@ IX_INVARIANCE_NORM_FLOOR_FRACTION = 1.0e-12
 
 # Output ----------------------------------------------------------------------
 OUTPUT_DIRECTORY = Path("ix_construction_output")
-SAVE_PLOTS = True
 SHOW_PLOTS = False
