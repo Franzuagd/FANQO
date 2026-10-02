@@ -272,6 +272,8 @@ def plot_invariance(
         method,
         output_path,
         show=show,
+        vmin=float(getattr(cfg, "IX_INVARIANCE_LOG_MIN", -14.0)),
+        vmax=float(getattr(cfg, "IX_INVARIANCE_LOG_MAX", 0.0)),
     )
 
 
