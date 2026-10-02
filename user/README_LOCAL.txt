@@ -1,22 +1,25 @@
-FANQO LOCAL STARTER FILES
+IxOptCompare-0.3
 
-These files are intentionally separate from the FANQO GitHub repository.
+The experiment is intentionally fixed to four cases:
 
-1. Create a working folder anywhere on your computer.
-2. Copy general_config.py, lattice_config.py, and run.py into it.
-3. Edit general_config.py for analysis/optimization settings.
-4. Edit lattice_config.py for your actual accelerator lattice.
-5. Activate the conda environment where FANQO is installed.
-6. From this folder run:
+    a_box + h_reduction
+    eigen + h_reduction
+    a_box + advisor_derivative
+    eigen + advisor_derivative
 
-   python run.py
+Edit general_config.py for the lattice/optimizer budget.
+Edit run.py only if you want to change QUICK or disable start/end FMA.
 
-Your generated plots/reports stay in this local working folder.
+A_BOX is fixed. There is no a_box calibration.
 
-PLOT DISPLAY MODE
------------------
-In general_config.py:
-    SAVE_PLOTS = True
-    SHOW_PLOTS = False
-saves figures without opening GUI windows. This is the recommended mode for long runs.
+Run:
 
+    python run.py
+
+Results are written under:
+
+    optimization_compare/<construction>__<objective>/
+
+and the compact matrix summary is:
+
+    optimization_compare/comparison_summary.json
