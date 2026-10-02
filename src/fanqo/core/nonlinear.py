@@ -613,6 +613,9 @@ def quadratic_invariants(data, state):
         i = v[powers]
         Sx[i] = physical / C[i]
 
+    if state.get("horizontal_slice_only", False):
+        return Sx, None
+
     Sy = np.zeros(q, dtype=float)
     for powers, physical in (
         ((0, 0, 2, 0, 0), gy),
