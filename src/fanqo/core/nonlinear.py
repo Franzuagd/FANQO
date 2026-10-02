@@ -812,63 +812,142 @@ def _cs_grade_coefficient_transform(state, indices):
 
 
 def graded_least_squares_ix(transfer, data, state, tol=1e-14):
-    """Bi-graded fixed-Sx solve.
+    """Bi-graded fixed-Sx solve with the original CS/Fischer mathematics.
 
-    The default graded_ls state uses C='fischer'.  Therefore Euclidean least
-    squares inside each block is already the factorial Fischer metric in
-    physical monomial coefficients.
+    C is only the stored-basis representation.  Before the graded solve, the
+    transfer and seed are converted back to physical monomial coefficients.
+    Each homogeneous block is then transformed to Courant-Snyder normalized
+    coordinates and solved with the factorial Fischer residual norm, exactly as
+    in the earlier working graded_ls implementation.
+
+    This is important: a diagonal factorial C alone is not equivalent to the
+    Courant-Snyder transformation when alpha != 0.  The CS transform must
+    remain explicit.
     """
+    transfer = np.asarray(transfer, dtype=float)
+    scale = np.asarray(state["C"], dtype=float)
+    size = len(state["idx_to_vec"])
+
+    if transfer.shape != (size, size):
+        raise ValueError("Transfer shape does not match the polynomial basis.")
+
+    # stored coefficients c satisfy physical_coefficients = C*c.
+    # Therefore T_physical = C*T_stored*C^{-1}.
+    transfer_physical = (
+        scale[:, None] * transfer / scale[None, :]
+    )
+
     groups = _grade_index_map(state)
     blocks = tuple(sorted(groups, key=_graded_block_order))
-    Sx, _ = quadratic_invariants(data, state)
+    if not blocks:
+        raise ValueError("graded_ls found an empty polynomial basis.")
 
-    c = np.zeros(len(state["idx_to_vec"]), dtype=float)
-    c[: len(Sx)] = Sx
-    solved = []
-    details = []
+    Sx_stored, _ = quadratic_invariants(data, state)
+    q = len(Sx_stored)
 
-    fixed = {(0, 0), (0, 1), (0, 2)}
+    fixed_physical = np.zeros(size, dtype=float)
+    fixed_physical[:q] = scale[:q] * np.asarray(Sx_stored, dtype=float)
+
+    transforms = {}
+    inverse_transforms = {}
+    coefficients_normalized = {}
+    fixed_blocks = {(0, 0), (0, 1), (0, 2)}
 
     for block in blocks:
-        if block in fixed:
+        indices = groups[block]
+        transform = _cs_grade_coefficient_transform(state, indices)
+        transforms[block] = transform
+        inverse_transforms[block] = np.linalg.inv(transform)
+
+        if block in fixed_blocks:
+            coefficients_normalized[block] = (
+                transform @ fixed_physical[indices]
+            )
+
+    invariant_physical = fixed_physical.copy()
+    solved_blocks = []
+    block_details = []
+
+    for block in blocks:
+        if block in fixed_blocks:
             continue
 
         rows = groups[block]
-        Tbb = transfer[np.ix_(rows, rows)]
-        D = np.eye(len(rows)) - Tbb
+        Cb = transforms[block]
+        Cb_inv = inverse_transforms[block]
+
+        Tbb_physical = transfer_physical[np.ix_(rows, rows)]
+        Tbb_normalized = Cb @ Tbb_physical @ Cb_inv
+        D = np.eye(len(rows), dtype=float) - Tbb_normalized
+
         U = np.zeros(len(rows), dtype=float)
-
-        for previous in blocks:
-            if _graded_block_order(previous) >= _graded_block_order(block):
+        for previous_block in blocks:
+            if _graded_block_order(previous_block) >= _graded_block_order(block):
                 break
-            columns = groups[previous]
-            previous_c = c[columns]
-            if np.any(previous_c):
-                U += transfer[np.ix_(rows, columns)] @ previous_c
 
-        solution, _, rank, singular = np.linalg.lstsq(D, U, rcond=tol)
-        c[rows] = solution
-        solved.append(block)
+            previous_coefficients = coefficients_normalized.get(previous_block)
+            if previous_coefficients is None or not np.any(previous_coefficients):
+                continue
+
+            columns = groups[previous_block]
+            Tba_physical = transfer_physical[np.ix_(rows, columns)]
+            Tba_normalized = (
+                Cb
+                @ Tba_physical
+                @ inverse_transforms[previous_block]
+            )
+            U += Tba_normalized @ previous_coefficients
+
+        weights = _fischer_row_weights(state, rows)
+        weighted_D = weights[:, None] * D
+        weighted_U = weights * U
+
+        solution, _, rank, singular_values = np.linalg.lstsq(
+            weighted_D,
+            weighted_U,
+            rcond=tol,
+        )
+        coefficients_normalized[block] = solution
+        invariant_physical[rows] = Cb_inv @ solution
+        solved_blocks.append(block)
+
         residual = U - D @ solution
-        details.append({
+        fischer_residual = float(np.linalg.norm(weights * residual))
+        fischer_rhs = float(np.linalg.norm(weighted_U))
+
+        block_details.append({
             "delta_degree": int(block[0]),
             "transverse_degree": int(block[1]),
+            "total_degree": int(block[0] + block[1]),
             "size": int(len(rows)),
             "rank": int(rank),
-            "residual": float(np.linalg.norm(residual)),
+            "fischer_residual": fischer_residual,
+            "fischer_rhs_norm": fischer_rhs,
+            "relative_residual": (
+                fischer_residual / fischer_rhs
+                if fischer_rhs > 0.0 else 0.0
+            ),
             "min_relative_singular": (
-                float(singular[-1] / singular[0])
-                if singular.size and singular[0] > 0 else float("nan")
+                float(singular_values[-1] / singular_values[0])
+                if singular_values.size and singular_values[0] > 0.0
+                else float("nan")
             ),
         })
 
-    return c, {
+    invariant_stored = invariant_physical / scale
+    # Preserve the exact stored Courant-Snyder seed, without roundoff from
+    # physical->stored conversion.
+    invariant_stored[:q] = Sx_stored
+
+    return invariant_stored, {
         "fixed_quadratic": "Sx",
-        "metric": "Fischer through C",
         "grading": "(delta_degree, transverse_degree)",
-        "solved_blocks": tuple(solved),
-        "solved_grades": tuple(sorted({a + b for a, b in solved})),
-        "grade_details": tuple(details),
+        "block_order": "(total_degree, delta_degree)",
+        "coordinate_system": "Courant-Snyder normalized transverse coordinates",
+        "metric": "Fischer factorial metric: alpha!",
+        "solved_blocks": tuple(solved_blocks),
+        "solved_grades": tuple(sorted({a + b for a, b in solved_blocks})),
+        "grade_details": tuple(block_details),
     }
 
 
