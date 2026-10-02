@@ -49,6 +49,17 @@ def write_run_report(
         _line("tracking_steps", list(map(int, config.TRACKING_STEPS))),
         _line("tracking_turns", int(config.TRACKING_TURNS)),
         _line("tracking_delta", float(config.TRACKING_DELTA)),
+        _line(
+            "tracking_deltas",
+            tuple(
+                float(value)
+                for value in getattr(
+                    config,
+                    "TRACKING_DELTAS",
+                    (config.TRACKING_DELTA,),
+                )
+            ),
+        ),
         _line("tracking_num_int_steps", int(config.TRACKING_NUM_INT_STEPS)),
         _line(
             "tracking_physical_ring_cells",
