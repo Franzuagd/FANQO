@@ -38,6 +38,45 @@ from . import nonlinear as nl
 # =============================================================================
 
 
+def h_reduction(data):
+    """Minimize the nonlinear tail h of the horizontal invariant.
+
+    FANQO orders the coefficient vector as
+
+        Ix = [quadratic/linear block ; h],
+
+    where quad_size contains all delta=0 transverse monomials of degree <= 2.
+    The objective is
+
+        J_h = sqrt(h^T G_nn h).
+
+    For a_box this is the usual nonlinear correction norm after the fixed
+    Courant-Snyder block. For eigen the same block split is used, so the free
+    quadratic normalization of the eigenvector is not directly penalized.
+
+    The numerical value is representation-dependent; final comparison between
+    constructions should use the common physical FMA/Ix-tracking diagnostics.
+    """
+    Ix = np.asarray(data["Ix"], dtype=float).reshape(-1)
+    state = data["state"]
+    q = int(state["quad_size"])
+    size = len(state["idx_to_vec"])
+    if Ix.size != size:
+        raise ValueError(f"Ix must have length {size}, received {Ix.size}.")
+
+    h = Ix[q:]
+    Gnn = np.asarray(state["Gnn"], dtype=float)
+    value_sq = float(h @ Gnn @ h)
+    value = float(np.sqrt(max(value_sq, 0.0)))
+
+    return value, {
+        "h_norm": value,
+        "h_coefficients": int(h.size),
+    }
+
+
+h_reduction.requires = {"Ix"}
+
 def horizontal_invariant_shape(data, *, gradient_weight=0.10):
     """Penalize nonlinear departure from the horizontal CS invariant.
 
