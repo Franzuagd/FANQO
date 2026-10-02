@@ -56,22 +56,27 @@ def main():
     for method in methods:
         fq.construct(method)
 
-    tracking = fq.track(force=FORCE_TRACKING)
-
-    for method in INVARIANCE_PLOTS:
-        fq.plot_invariance(
-            method,
-            tracking=tracking,
-            force_metrics=FORCE_METRICS,
+    # Each delta gets its own physical tracking cache and output directory.
+    for delta in fq.tracking_deltas():
+        tracking = fq.track(
+            delta=delta,
+            force=FORCE_TRACKING,
         )
 
-    for name1, name2 in COMPARISON_PLOTS:
-        fq.plot_comparison(
-            name1,
-            name2,
-            tracking=tracking,
-            force_metrics=FORCE_METRICS,
-        )
+        for method in INVARIANCE_PLOTS:
+            fq.plot_invariance(
+                method,
+                tracking=tracking,
+                force_metrics=FORCE_METRICS,
+            )
+
+        for name1, name2 in COMPARISON_PLOTS:
+            fq.plot_comparison(
+                name1,
+                name2,
+                tracking=tracking,
+                force_metrics=FORCE_METRICS,
+            )
 
 if __name__ == "__main__":
     main()
