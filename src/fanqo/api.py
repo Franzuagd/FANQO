@@ -229,13 +229,6 @@ def status():
             if STATE.context is not None
             else None
         ),
-        "a_box_mode": (
-            str(getattr(cfg, "A_BOX_MODE", "fixed")).lower() if cfg else None
-        ),
-        "a_box_calibrated": bool(
-            STATE.a_box_result is not None
-            and STATE.a_box_result.get("make_active", False)
-        ),
         "Ix_available": STATE.Ix is not None,
         "Iy_available": STATE.Iy is not None,
         "optimization_completed": STATE.optimization_result is not None,
@@ -914,30 +907,6 @@ def plot_invariant_tracking(
 
 
 # =============================================================================
-# A_BOX CALIBRATION
-# =============================================================================
-
-def optimize_a_box(
-    *,
-    coords_mm=None,
-    steps=None,
-    turns=None,
-    delta=None,
-    make_active=True,
-):
-    """Run the one-time a_box calibration implemented in fanqo.a_box."""
-    from .a_box import optimize_a_box as _optimize_a_box
-
-    return _optimize_a_box(
-        coords_mm=coords_mm,
-        steps=steps,
-        turns=turns,
-        delta=delta,
-        make_active=make_active,
-    )
-
-
-# =============================================================================
 # REPORT WRITERS
 # =============================================================================
 
@@ -1013,16 +982,6 @@ def _optimization_report_text(result):
         dtype=float,
     )
     lines += ["", "A_BOX", "-"*90, f"active a_box = {active_a_box.tolist()}"]
-    if STATE.a_box_result is not None:
-        ab = STATE.a_box_result
-        lines += [
-            f"calibration applied = {bool(ab.get('make_active', False))}",
-            f"surviving particles = {ab.get('survivor_count')} / {ab.get('total_particles')}",
-            f"seed a_box = {np.asarray(ab.get('survivor_seed_a_box')).tolist()}",
-            f"selected a_box = {np.asarray(ab.get('best_a_box')).tolist()}",
-            f"seed score = {ab.get('seed_score')}",
-            f"selected score = {ab.get('best_score')}",
-        ]
     lines += [
         "", "OPTIMIZED PARAMETERS", "-"*90,
         f"{'parameter':<14}{'initial':>24}{'final':>24}{'change':>24}",
@@ -1152,13 +1111,12 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
     """Run the complete nonlinear magnet optimization.
 
     High-level order:
-      1. optionally calibrate a_box once;
-      2. inspect Fobj.requires and compute start diagnostics;
-      3. optionally run start FMA/tracking;
-      4. run CMA-ES plus optional Powell refinement;
-      5. make the winning lattice/invariant the active STATE;
-      6. optionally run end FMA/tracking;
-      7. save lattice and reports.
+      1. inspect Fobj.requires and compute start diagnostics;
+      2. optionally run start FMA/tracking;
+      3. run CMA-ES plus optional Powell refinement;
+      4. make the winning lattice/invariant the active STATE;
+      5. optionally run end FMA/tracking;
+      6. save lattice and reports.
 
     Fobj is passed explicitly so objective choice remains independent of
     INVARIANT_CONSTRUCTION.
@@ -1169,23 +1127,6 @@ def optimize(Fobj, *, run_start_end_fma=None, quick=False):
     if not callable(Fobj):
         raise TypeError("Fobj must be a callable objective function.")
     opt.objective_requirements(Fobj)
-
-    # a_box calibration is a preprocessing step, not part of every magnet
-    # candidate. Once active, the selected box remains fixed during optimization.
-    construction = str(cfg.INVARIANT_CONSTRUCTION).lower()
-    a_box_mode = str(getattr(cfg, "A_BOX_MODE", "fixed")).lower()
-    if a_box_mode not in {"fixed", "auto"}:
-        raise ValueError("A_BOX_MODE must be 'fixed' or 'auto'.")
-    a_box_is_active = bool(
-        STATE.a_box_result is not None
-        and STATE.a_box_result.get("make_active", False)
-    )
-    if (
-        construction == "a_box"
-        and a_box_mode == "auto"
-        and not a_box_is_active
-    ):
-        optimize_a_box(make_active=True)
 
     if importlib.util.find_spec("cma") is None:
         raise ImportError(
