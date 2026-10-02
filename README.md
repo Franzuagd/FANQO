@@ -88,6 +88,31 @@ D = max_n |Ix(n)-Ix(0)| / (max(|Ix(0)|, floor) * n)
 and the individual invariance map uses the fixed log10 range configured by
 `IX_INVARIANCE_LOG_MIN/MAX`.
 
+## Off-momentum validation
+
+The same invariant constructions can be tested at several momentum offsets in
+one run:
+
+```python
+TRACKING_DELTAS = (0.0, 0.005, 0.01, -0.005)
+```
+
+Each value gets an independent physical tracking cache and an independent plot
+tree, for example:
+
+```text
+ix_construction_output/
+    delta_p0/
+    delta_p0p005/
+    delta_p0p01/
+    delta_m0p005/
+```
+
+The polynomial invariant is constructed once; only the physical validation
+trajectory changes with delta.  This is useful for testing whether a metric
+that explicitly includes the delta scale, such as `a_box`, behaves
+differently off momentum.
+
 ## Plots
 
 This branch intentionally has only two plot types:
