@@ -75,6 +75,8 @@ def plot_invariance_map(
     output_path,
     *,
     show=False,
+    vmin=-14.0,
+    vmax=0.0,
 ):
     """Plot log10 invariant drift for one method."""
     plt = get_pyplot(show)
@@ -84,15 +86,33 @@ def plot_invariance_map(
     valid = np.asarray(metrics["valid"], dtype=bool)
 
     fig, ax = plt.subplots(figsize=(9.0, 6.8))
-    scatter = _scatter_map(
-        ax,
-        x,
-        y,
-        np.where(valid, values, np.nan),
-        cmap="viridis",
-        invalid=~valid,
-        symmetric=False,
-    )
+    shown = np.where(valid, values, np.nan)
+    finite = np.isfinite(shown)
+    if np.any(finite):
+        scatter = ax.scatter(
+            x[finite],
+            y[finite],
+            c=shown[finite],
+            cmap="viridis",
+            vmin=float(vmin),
+            vmax=float(vmax),
+            marker="s",
+            s=34,
+            linewidths=0,
+        )
+    else:
+        scatter = None
+
+    if np.any(~valid):
+        ax.scatter(
+            x[~valid],
+            y[~valid],
+            marker="s",
+            s=20,
+            color="0.88",
+            linewidths=0,
+            zorder=0,
+        )
     if scatter is not None:
         cbar = fig.colorbar(scatter, ax=ax)
         cbar.set_label(r"$\log_{10} D_{I_x}$")
@@ -100,7 +120,7 @@ def plot_invariance_map(
     ax.set_xlabel(r"$x_0$ [mm]")
     ax.set_ylabel(r"$y_0$ [mm]")
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(f"{method}: tracked $I_x$ invariance")
+    ax.set_title(f"{method}: horizontal invariant tracking")
     ax.grid(alpha=0.2)
     fig.tight_layout()
 
