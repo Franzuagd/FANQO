@@ -129,4 +129,4 @@ def test_bigraded_solver_handles_same_total_degree_delta_block():
     assert np.isclose(Ix[6], 0.4)
     assert (1, 1) in details["solved_blocks"]
     assert details["grading"] == "(delta_degree, transverse_degree)"
-    assert details["metric"] == "Fischer through C"
+    assert details["metric"] == "Fischer factorial metric: alpha!"
