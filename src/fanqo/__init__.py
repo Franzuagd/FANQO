@@ -10,6 +10,7 @@ from .api import (
     coefficients,
     polynomial,
     construction_details,
+    tracking_deltas,
     tracking_directory,
     track,
     load_tracking,
