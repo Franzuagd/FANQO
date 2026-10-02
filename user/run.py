@@ -39,6 +39,13 @@ def main():
         selected.add(name2)
 
     methods = tuple(name for name in fq.available_methods() if name in selected)
+
+    fq.write_report(
+        methods=methods,
+        comparisons=COMPARISON_PLOTS,
+        tracking=fq.tracking_directory(),
+    )
+
     for method in methods:
         fq.construct(method)
 
@@ -58,13 +65,6 @@ def main():
             tracking=tracking,
             force_metrics=FORCE_METRICS,
         )
-
-    fq.write_report(
-        methods=methods,
-        comparisons=COMPARISON_PLOTS,
-        tracking=tracking,
-    )
-
 
 if __name__ == "__main__":
     main()
