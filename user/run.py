@@ -1,33 +1,69 @@
-"""Minimal invariant-construction experiment."""
+"""Small research runner.
+
+Edit only the selections below.  Numerical modules do not print.  The run is
+recorded in ix_construction_output/run_configuration.txt.
+"""
 
 import fanqo as fq
 
 
+CONFIG = "general_config.py"
+
+# One-method Ix invariance maps.
+INVARIANCE_PLOTS = (
+    "a_box",
+    "graded_ls",
+    "eigen",
+)
+
+# Pairwise red/blue maps.
+COMPARISON_PLOTS = (
+    ("a_box", "graded_ls"),
+    ("graded_ls", "eigen"),
+)
+
+# False reuses the saved physical trajectories when the tracking configuration
+# and lattice parameters are unchanged.
+FORCE_TRACKING = False
+
+# False reuses saved Ix drift values when the invariant coefficients are unchanged.
+FORCE_METRICS = False
+
+
 def main():
-    fq.load("general_config.py", force=True)
+    fq.load(CONFIG, force=True)
 
-    print(fq.status())
+    selected = set(INVARIANCE_PLOTS)
+    for name1, name2 in COMPARISON_PLOTS:
+        selected.add(name1)
+        selected.add(name2)
 
-    # Build any constructor directly.
-    for method in fq.available_methods():
-        result = fq.construct(method)
-        print(method, result["details"])
+    methods = tuple(name for name in fq.available_methods() if name in selected)
+    for method in methods:
+        fq.construct(method)
 
-    # name1 is red when better; name2 is blue when better.
-    # Full 5-D comparisons:
-    fq.compare("a_box", "eigen")
-    fq.compare("graded_ls", "eigen")
-    fq.compare("cesaro", "eigen")
-    fq.compare("abel", "eigen")
-    fq.compare("graded_ls", "cesaro")
-    fq.compare("graded_ls", "abel")
-    fq.compare("a_box", "graded_ls")
-    fq.compare("hybrid", "graded_ls")
+    tracking = fq.track(force=FORCE_TRACKING)
 
-    # If either method is a_box_y0, compare() automatically tracks y0=0 only.
-    fq.compare("a_box_y0", "eigen")
-    fq.compare("a_box_y0", "hybrid")
-    fq.compare("a_box_y0", "graded_ls")
+    for method in INVARIANCE_PLOTS:
+        fq.plot_invariance(
+            method,
+            tracking=tracking,
+            force_metrics=FORCE_METRICS,
+        )
+
+    for name1, name2 in COMPARISON_PLOTS:
+        fq.plot_comparison(
+            name1,
+            name2,
+            tracking=tracking,
+            force_metrics=FORCE_METRICS,
+        )
+
+    fq.write_report(
+        methods=methods,
+        comparisons=COMPARISON_PLOTS,
+        tracking=tracking,
+    )
 
 
 if __name__ == "__main__":
