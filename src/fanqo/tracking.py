@@ -16,6 +16,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -180,54 +181,120 @@ def _cache_signature(config, lattice_cfg, context):
 
 
 def _dominant_tune(signal):
-    """AT harmonic-analysis tune, with a simple FFT fallback."""
-    signal = np.asarray(signal, dtype=float)
+    """Tune of one normalized complex betatron signal.
+
+    AT harmonic analysis is the primary estimator.  Very small signals have no
+    meaningful tune, so they are returned as NaN without asking AT to search.
+    AT warnings are intentionally local to this routine and are not printed by
+    the research runner.
+    """
+    signal = np.asarray(signal, dtype=np.complex128).reshape(-1)
     if len(signal) < 16 or not np.all(np.isfinite(signal)):
         return np.nan
+
     signal = signal - np.mean(signal)
+    amplitude = float(np.sqrt(np.mean(np.abs(signal) ** 2)))
+    reference = max(float(np.max(np.abs(signal))), 1.0)
+    if amplitude <= 1.0e-14 * reference:
+        return np.nan
 
     try:
+        from at.lattice import AtWarning
         from at.physics.harmonic_analysis import get_tunes_harmonic
-        tune = np.asarray(
-            get_tunes_harmonic(signal, method="interp_fft"),
-            dtype=float,
-        ).reshape(-1)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", AtWarning)
+            tune = np.asarray(
+                get_tunes_harmonic(
+                    signal.reshape(1, -1),
+                    method="interp_fft",
+                    fmin=0.0,
+                    fmax=1.0,
+                    num_harmonics=8,
+                    maxiter=50,
+                    remove_mean=True,
+                ),
+                dtype=float,
+            ).reshape(-1)
+
         if tune.size and np.isfinite(tune[0]):
-            return float(tune[0])
+            return float(tune[0] % 1.0)
+
     except (ImportError, AttributeError, TypeError, ValueError):
         pass
 
-    spectrum = np.abs(np.fft.rfft(signal))
-    frequency = np.fft.rfftfreq(len(signal))
-    mask = (frequency > 0.0) & (frequency < 0.5)
-    if not np.any(mask):
+    # Numerical fallback only if harmonic analysis did not return a tune.
+    spectrum = np.abs(np.fft.fft(signal))
+    frequency = np.fft.fftfreq(len(signal))
+    if len(spectrum) <= 1:
         return np.nan
-    indices = np.flatnonzero(mask)
-    return float(frequency[indices[np.argmax(spectrum[indices])]])
+    spectrum[0] = 0.0
+    k = int(np.argmax(spectrum))
+    if not np.isfinite(spectrum[k]) or spectrum[k] <= 0.0:
+        return np.nan
+    return float(frequency[k] % 1.0)
 
 
-def _fma_from_trajectory(trajectory):
-    """AT-style split-window frequency-map summary from saved tracking."""
+def _normalized_betatron_signals(trajectory, cs0):
+    """Courant-Snyder normalized complex x/y signals.
+
+    This follows the same normalization used by Accelerator Toolbox nonlinear
+    tune analysis:
+
+        X  = x / sqrt(beta)
+        PX = alpha*x/sqrt(beta) + sqrt(beta)*px
+        a  = X - i PX
+
+    and analogously in y.
+    """
+    z = np.asarray(trajectory, dtype=float)
+    bx, ax, _, by, ay, _ = np.asarray(cs0, dtype=float)
+
+    if bx <= 0.0 or by <= 0.0:
+        raise ValueError("Positive beta functions are required for FMA.")
+
+    x = z[0] - np.mean(z[0])
+    px = z[1] - np.mean(z[1])
+    y = z[2] - np.mean(z[2])
+    py = z[3] - np.mean(z[3])
+
+    sbx = math.sqrt(float(bx))
+    sby = math.sqrt(float(by))
+
+    X = x / sbx
+    PX = float(ax) * x / sbx + sbx * px
+    Y = y / sby
+    PY = float(ay) * y / sby + sby * py
+
+    return X - 1j * PX, Y - 1j * PY
+
+
+def _fma_from_trajectory(trajectory, cs0):
+    """Split-window FMA summary from one saved physical trajectory."""
     z = np.asarray(trajectory, dtype=float)
     n = z.shape[1]
     half = n // 2
     if half < 16:
         return (np.nan,) * 5
 
-    qx1 = _dominant_tune(z[0, :half])
-    qx2 = _dominant_tune(z[0, -half:])
-    qy1 = _dominant_tune(z[2, :half])
-    qy2 = _dominant_tune(z[2, -half:])
+    ax_signal, ay_signal = _normalized_betatron_signals(z, cs0)
+
+    qx1 = _dominant_tune(ax_signal[:half])
+    qx2 = _dominant_tune(ax_signal[-half:])
+    qy1 = _dominant_tune(ay_signal[:half])
+    qy2 = _dominant_tune(ay_signal[-half:])
 
     if not np.all(np.isfinite([qx1, qx2, qy1, qy2])):
         diffusion = np.nan
     else:
-        dqx = qx2 - qx1
-        dqy = qy2 - qy1
+        # Circular tune difference: 0.99 and 0.01 differ by 0.02, not 0.98.
+        dqx = ((qx2 - qx1 + 0.5) % 1.0) - 0.5
+        dqy = ((qy2 - qy1 + 0.5) % 1.0) - 0.5
         diffusion = 0.5 * math.log10(
             max((dqx * dqx + dqy * dqy) / float(half), 1e-20)
         )
         diffusion = float(np.clip(diffusion, -10.0, -2.0))
+
     return qx1, qx2, qy1, qy2, diffusion
 
 
@@ -283,6 +350,7 @@ def track(config, lattice_cfg, context, cache_directory, *, force=False):
     nx, ny = map(int, config.TRACKING_STEPS)
     turns = int(config.TRACKING_TURNS)
     delta = float(config.TRACKING_DELTA)
+    cs0 = np.asarray(lin.linear_data(native["data"], "CS0"), dtype=float)
 
     xs = np.linspace(min(xmin, xmax), max(xmin, xmax), nx)
     ys = np.linspace(min(ymin, ymax), max(ymin, ymax), ny)
@@ -358,7 +426,7 @@ def track(config, lattice_cfg, context, cache_directory, *, force=False):
             survived[global_index] = bool(ncomplete == turns and not lost[local])
 
             usable = coordinates[:, global_index, : ncomplete + 1]
-            values = _fma_from_trajectory(usable)
+            values = _fma_from_trajectory(usable, cs0)
             qx1[global_index], qx2[global_index], qy1[global_index], qy2[global_index], diffusion[global_index] = values
 
     coordinates.flush()
