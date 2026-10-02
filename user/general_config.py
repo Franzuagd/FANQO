@@ -1,28 +1,21 @@
-"""Minimal configuration for the Ixcononly research branch.
-
-This branch studies invariant construction only. There are no magnet-optimizer,
-objective-function, Powell/CMA, or automatic-a_box settings.
-
-Polynomial coordinate convention:
-    [delta, x, y, px, py]
-"""
+"""Research configuration for invariant-construction experiments."""
 
 from pathlib import Path
+
 import numpy as np
 import sympy as sp
 
 
-# Fixed accelerator used by every constructor.
+# Lattice ---------------------------------------------------------------------
 LATTICE_FILE = "lattice_config.py"
 ANALYSIS_CELLS = 1
 CORRECT_CHROMATICITY = True
 
 
-# Symbolic phase-space variables.
+# Polynomial model ------------------------------------------------------------
 delta, x, y, px, py = sp.symbols("delta x y px py")
 VARIABLES = [delta, x, y, px, py]
 
-# Element/Hamiltonian coefficients.
 b1, b2, b3, b4, b5 = sp.symbols("b1 b2 b3 b4 b5")
 FIELD_SYMBOLS = [b1, b2, b3, b4, b5]
 
@@ -35,46 +28,84 @@ HAMILTONIAN = (
     + sp.Rational(1, 4) * b4 * (x**4 - 6 * x**2 * y**2 + y**4)
 )
 
-
-# Polynomial truncation.
 ORDER = 8
 DELTA_ORDER = 1
 N_PLANES = 2
-
-# Used by the weighted a_box construction.
-# a_box_y0 automatically replaces y and py by exactly zero and rebuilds a
-# reduced (delta,x,px) basis. Keep this normal 5-D box positive.
-A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
-
 LEAST_SQUARES_TOL = 1.0e-16
 
-# Map-averaging invariant constructors.
-# cesaro: c_N = (1/N) sum_{k=0}^{N-1} T^k Sx
-CESARO_TERMS = 64
 
-# abel: c_rho = (1-rho) (I-rho*T)^(-1) Sx
-# Larger rho approaches the fixed subspace more strongly but makes the
-# resolvent increasingly ill-conditioned as rho -> 1.
+# Representation --------------------------------------------------------------
+# Every method uses the same full [delta,x,y,px,py] monomial index set.
+#
+# C controls the scaled polynomial basis e_i = C_i z^alpha_i.
+# G is built after C.
+#
+# C may be:
+#   "a_box"      -> original box normalization
+#   "fischer"    -> factorial scaling
+#   [cδ,cx,cy,cpx,cpy] -> coordinate scaling lifted to all monomials
+#   one number per monomial
+#   a callable(idx_to_vec) -> full C
+#
+# G may be:
+#   "box"        -> symmetric-box L2 metric using C and A_BOX
+#   "coefficient"-> Euclidean metric in the C-scaled basis
+#   "fischer"    -> Fischer metric for the current C
+#   a matrix or callable(idx_to_vec, C)
+A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
+
+INVARIANT_OPTIONS = {
+    "a_box": {
+        "C": "a_box",
+        "G": "box",
+    },
+    "a_box_y0": {
+        "C": "a_box",
+        "G": "box",
+        "horizontal_only": True,
+    },
+    "hybrid": {
+        "C": np.ones(5),
+        "G": "coefficient",
+    },
+    "eigen": {
+        "C": np.ones(5),
+        "G": "coefficient",
+    },
+    "graded_ls": {
+        "C": "fischer",
+        "G": "coefficient",
+    },
+    "cesaro": {
+        "C": np.ones(5),
+        "G": "coefficient",
+    },
+    "abel": {
+        "C": np.ones(5),
+        "G": "coefficient",
+    },
+}
+
+CESARO_TERMS = 64
 ABEL_RHO = 0.98
 
 
-# Paired physical tracking used by compare(name1, name2).
-# Coordinates are [xmin, xmax, ymin, ymax] in millimetres.
+# Tracking --------------------------------------------------------------------
 TRACKING_COORDS_MM = [-15.0, 15.0, -15.0, 15.0]
 TRACKING_STEPS = [121, 121]
 TRACKING_TURNS = 512
 TRACKING_DELTA = 0.0
 TRACKING_NUM_INT_STEPS = 10
-
-# None -> infer the number of cells required for 360 degrees.
 TRACKING_PHYSICAL_RING_CELLS = None
 TRACKING_POOL_SIZE = None
 
-# Relative-Ix denominator floor.
+# Raw turn-by-turn trajectories and FMA values are kept here and reused.
+TRACKING_CACHE = Path("ix_construction_output/tracking_cache")
+
 IX_INVARIANCE_NORM_FLOOR_FRACTION = 1.0e-12
 
 
-# Output.
+# Output ----------------------------------------------------------------------
+OUTPUT_DIRECTORY = Path("ix_construction_output")
 SAVE_PLOTS = True
 SHOW_PLOTS = False
-OUTPUT_DIRECTORY = Path("ix_construction_output")
