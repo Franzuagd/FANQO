@@ -320,7 +320,10 @@ def write_report(
     *,
     methods,
     comparisons,
+    invariance_plots=(),
     tracking=None,
+    force_tracking=None,
+    force_metrics=None,
     output_path=None,
 ):
     """Write the compact text record for one run."""
@@ -341,5 +344,8 @@ def write_report(
         _context(),
         methods=methods,
         comparisons=comparisons,
+        invariance_plots=invariance_plots,
         tracking_directory=tracking_dir,
+        force_tracking=force_tracking,
+        force_metrics=force_metrics,
     )
