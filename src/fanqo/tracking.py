@@ -25,6 +25,9 @@ from .core import linear as lin
 from .core import nonlinear as nl
 
 
+FMA_VERSION = 2
+
+
 def _jsonable(value):
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -298,6 +301,29 @@ def _fma_from_trajectory(trajectory, cs0):
     return qx1, qx2, qy1, qy2, diffusion
 
 
+
+def _refresh_fma(folder, cs0):
+    """Recompute FMA arrays from saved turn-by-turn coordinates only."""
+    folder = Path(folder).resolve()
+    coordinates = np.load(folder / "coordinates.npy", mmap_mode="r")
+    completed = np.load(folder / "completed_turns.npy", mmap_mode="r")
+    npoints = coordinates.shape[1]
+
+    for i in range(npoints):
+        ncomplete = int(completed[i])
+        if ncomplete < 1:
+            continue
+        usable = coordinates[:, i, : ncomplete + 1]
+        values = _fma_from_trajectory(usable, cs0)
+        qx1[i], qx2[i], qy1[i], qy2[i], diffusion[i] = values
+
+    np.save(folder / "qx1.npy", qx1)
+    np.save(folder / "qx2.npy", qx2)
+    np.save(folder / "qy1.npy", qy1)
+    np.save(folder / "qy2.npy", qy2)
+    np.save(folder / "fma_diffusion.npy", diffusion)
+
+
 def default_cache_directory(config, config_directory):
     value = getattr(config, "TRACKING_CACHE", None)
     if value is None:
@@ -341,6 +367,18 @@ def track(config, lattice_cfg, context, cache_directory, *, force=False):
     if metadata_path.is_file() and not force:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         if metadata.get("signature") == signature:
+            if int(metadata.get("fma_version", 0)) != FMA_VERSION:
+                native = _prepare_physical_ring(config, lattice_cfg, context)
+                cs0 = np.asarray(
+                    lin.linear_data(native["data"], "CS0"),
+                    dtype=float,
+                )
+                _refresh_fma(folder, cs0)
+                metadata["fma_version"] = FMA_VERSION
+                metadata_path.write_text(
+                    json.dumps(metadata, indent=2),
+                    encoding="utf-8",
+                )
             return load_tracking(folder)
 
     folder.mkdir(parents=True, exist_ok=True)
@@ -425,20 +463,16 @@ def track(config, lattice_cfg, context, cache_directory, *, force=False):
             completed[global_index] = ncomplete
             survived[global_index] = bool(ncomplete == turns and not lost[local])
 
-            usable = coordinates[:, global_index, : ncomplete + 1]
-            values = _fma_from_trajectory(usable, cs0)
-            qx1[global_index], qx2[global_index], qy1[global_index], qy2[global_index], diffusion[global_index] = values
 
     coordinates.flush()
     np.save(folder / "x_mm.npy", x_mm)
     np.save(folder / "y_mm.npy", y_mm)
     np.save(folder / "survived.npy", survived)
     np.save(folder / "completed_turns.npy", completed)
-    np.save(folder / "qx1.npy", qx1)
-    np.save(folder / "qx2.npy", qx2)
-    np.save(folder / "qy1.npy", qy1)
-    np.save(folder / "qy2.npy", qy2)
-    np.save(folder / "fma_diffusion.npy", diffusion)
+
+    # FMA is a post-processing step over the saved trajectories.  It can be
+    # regenerated later without running patpass again.
+    _refresh_fma(folder, cs0)
 
     metadata = {
         "signature": signature,
@@ -449,6 +483,7 @@ def track(config, lattice_cfg, context, cache_directory, *, force=False):
         "npoints": int(npoints),
         "turns": int(turns),
         "shape": [6, int(npoints), int(turns + 1)],
+        "fma_version": FMA_VERSION,
     }
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return load_tracking(folder)
