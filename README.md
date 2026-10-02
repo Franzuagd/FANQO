@@ -1,254 +1,123 @@
 # FANQO — Ixcononly
 
-Experimental branch for studying **horizontal nonlinear invariant construction**
-on a fixed accelerator lattice.
+Research branch for comparing horizontal nonlinear invariant constructions on a
+fixed accelerator lattice.
 
-This branch intentionally removes magnet optimization, objective campaigns,
-automatic `a_box` calibration, CMA-ES, Powell, and optimization reports. Its
-purpose is to answer one question cleanly:
+This branch has no magnet optimization.  The intended workflow is:
 
-> Given the same lattice and the same physical tracked trajectories, which
-> construction produces the better horizontal quasi-invariant `Ix`?
+1. build the nonlinear polynomial map;
+2. construct several candidate invariants;
+3. track the physical grid once;
+4. reuse the saved trajectories for every invariant-quality and comparison plot.
 
-## Invariant constructors
+## Common polynomial representation
 
-`fq.available_methods()` returns:
-
-### `a_box`
-
-Original full 5-D weighted least-squares continuation of the horizontal
-Courant-Snyder quadratic invariant:
+Every method uses exactly the same full monomial index set
 
 ```text
-min_h ||(I - T_nn) h - T_nq Sx||_G
+[delta, x, y, px, py]
 ```
 
-The polynomial basis is scaled using `A_BOX`.
+up to the configured `ORDER` and `DELTA_ORDER`.
 
-### `a_box_y0`
-
-Exact horizontal-slice version of `a_box`. Before the basis, Gram matrix, or
-Lie algebra is built, FANQO restricts to
+The stored basis is
 
 ```text
-y = py = 0
+e_i(z) = C_i z^alpha_i
 ```
 
-and keeps only monomials in
+and physical coefficients are
 
 ```text
-(delta, x, px)
+c_physical = C * c_stored.
 ```
 
-The least-squares solve is still G-weighted, but G is now the reduced horizontal
-Gram matrix. This is not a tiny-y approximation.
+`C` is the main representation choice.  `G` is built after `C`.
 
-### `hybrid`
+The defaults are visible in `user/general_config.py`:
 
-Uses the same **unscaled physical Cartesian monomial representation** as the
-eigen construction:
+- `a_box`: C from A_BOX, G is the box L2 metric;
+- `a_box_y0`: same full basis and same C/G, but coefficients containing y or py are constrained to zero;
+- `hybrid`, `eigen`, `cesaro`, `abel`: C=(1,1,1,1,1), coefficient metric;
+- `graded_ls`: factorial/Fischer C, coefficient metric.
+
+The y0 method therefore still returns a full-length polynomial vector.  Its
+vertical and mixed coefficients are zero, so the resulting Ix is well-defined
+for arbitrary y even though the construction itself uses only horizontal
+monomials.
+
+## Adding a construction
+
+The main edit point is:
 
 ```text
-C = 1
-epsilon = 1
+src/fanqo/core/nonlinear.py
 ```
 
-but does not diagonalize `T-I`. Instead it fixes the Courant-Snyder quadratic
-block and solves
+A new construction normally needs only:
+
+1. a `construct_<name>(...)` function;
+2. one entry in `CONSTRUCTORS`;
+3. one default C/G entry in `DEFAULT_METHOD_OPTIONS`.
+
+The monomial basis, lattice map, coefficient conversion, and tracking code do
+not need to change.
+
+## Tracking cache
+
+Physical AT tracking is separated from plotting and invariant construction.
 
 ```text
-(I - T_nn) h = T_nq Sx
+ix_construction_output/tracking_cache/
 ```
 
-with ordinary Euclidean least squares:
+contains the turn-by-turn coordinates, survival data, and FMA tune/diffusion
+values.  The cache is reused when the lattice and tracking configuration have
+not changed.
 
-```python
-np.linalg.lstsq(D, U)
-```
+Invariant drift values are then computed from those saved trajectories and
+cached per method.  Creating additional invariant plots or pairwise comparison
+plots does not repeat the particle tracking.
 
-No Gram metric `G` and no Cholesky weighting enter this construction.
+## Plots
 
-### `eigen`
+This branch intentionally has only two plot types:
 
-Full unscaled physical monomial basis. FANQO diagonalizes `T-I`, selects a
-near-fixed real eigenvector, and normalizes its horizontal quadratic sector.
+- one-method tracked Ix invariance map;
+- pairwise comparison map
+  `log10(D_name2) - log10(D_name1)`.
 
-### `graded_ls`
-
-A_BOX-independent full 5-D least-squares continuation that keeps the quadratic
-Courant-Snyder part exactly fixed:
+For comparison maps:
 
 ```text
-Ix = Sx + I3 + I4 + ...
+positive / red  -> name1 has smaller Ix drift
+negative / blue -> name2 has smaller Ix drift
 ```
 
-FANQO exploits the lower-triangular polynomial transfer structure using the
-bi-grading
+## Runner
+
+Edit only the selections at the top of:
 
 ```text
-(delta degree, transverse degree)
+user/run.py
 ```
 
-with blocks traversed in `(total degree, delta degree)` order.  This also
-captures same-total-degree couplings such as a quadratic Sx term feeding a
-`delta*x` or `delta*px` block.
-
-For each block `b` it solves
+The runner does not print progress.  A compact description of the selected run
+is written to:
 
 ```text
-(I - T_bb) c_b = sum_(a<b) T_ba c_a
+ix_construction_output/run_configuration.txt
 ```
-
-only after all predecessor blocks are fixed.  The solve is performed in
-Courant-Snyder normalized transverse coordinates, where
-
-```text
-Sx = X^2 + P_X^2
-Sy = Y^2 + P_Y^2
-```
-
-and the residual is measured with the factorial Fischer product
-
-```text
-<z^alpha, z^beta>_F = alpha! delta_(alpha,beta),
-z = (X, P_X, Y, P_Y).
-```
-
-Delta labels the block but does not enter the metric.  Thus the metric itself
-depends only on transverse monomial factorials; no physical amplitude box or
-fitted scale appears.
-
-### `cesaro`
-
-A_BOX-independent mean-ergodic construction anchored to the exact
-Courant-Snyder quadratic invariant. Starting with
-
-```text
-c0 = (Sx, 0)
-```
-
-it forms
-
-```text
-cN = (1/N) sum_(k=0)^(N-1) T^k c0.
-```
-
-FANQO exploits the lower block structure so the Sx block is kept exactly fixed
-and only the nonlinear coefficients are iterated. `CESARO_TERMS` controls N.
-
-### `abel`
-
-A_BOX-independent Abel/resolvent average of the same Sx seed:
-
-```text
-c_rho = (1-rho) (I-rho*T)^(-1) c0,   0 < rho < 1.
-```
-
-With Sx kept fixed, FANQO solves only the nonlinear block:
-
-```text
-(I-rho*T_nn) h = rho*T_nq*Sx.
-```
-
-`ABEL_RHO` controls rho. Values closer to 1 project more strongly toward the
-fixed subspace but also make the resolvent more ill-conditioned.
-
-## Minimal workflow
-
-From `user/`:
-
-```python
-import fanqo as fq
-
-fq.load("general_config.py", force=True)
-
-a = fq.construct("a_box")
-h = fq.construct("hybrid")
-e = fq.construct("eigen")
-g = fq.construct("graded_ls")
-c = fq.construct("cesaro")
-r = fq.construct("abel")
-b = fq.construct("a_box_y0")
-```
-
-To inspect physical coefficients:
-
-```python
-c = fq.coefficients("hybrid")
-```
-
-To inspect the symbolic polynomial:
-
-```python
-Ix = fq.polynomial("a_box")
-```
-
-## Paired tracking comparison
-
-The main research function is:
-
-```python
-result = fq.compare("a_box", "eigen")
-```
-
-The two methods are evaluated on the **same tracked particle trajectories**.
-
-The plotted score is
-
-```text
-score = log10(D_name2) - log10(D_name1)
-```
-
-where `D` is the maximum relative Ix drift per completed ring turn.
-
-Therefore:
-
-- **red** = `name1` has smaller Ix drift;
-- **blue** = `name2` has smaller Ix drift;
-- white = comparable;
-- gray = particle lost / invalid comparison.
-
-For example:
-
-```python
-fq.compare("hybrid", "eigen")
-```
-
-means red = hybrid better and blue = eigen better.
-
-If either method is `a_box_y0`, `compare()` automatically restricts the launch
-set to the mathematically valid slice `y0=0`.
-
-Each comparison writes:
-
-```text
-ix_construction_output/<name1>_vs_<name2>/
-├── comparison.png
-└── comparison.csv
-```
-
-## Configuration
-
-`user/general_config.py` contains only:
-
-- lattice selection;
-- Hamiltonian and polynomial order;
-- `A_BOX` (used only by the a_box-family comparisons; graded_ls does not use it);
-- chromatic correction;
-- physical tracking box, grid, turns, and integration steps;
-- output controls.
-
-There are no optimizer settings on this branch.
 
 ## Install
+
+```bash
+python -m pip install --upgrade --force-reinstall "git+https://github.com/Franzuagd/FANQO.git@Ixcononly"
+```
+
+For a local editable checkout:
 
 ```bash
 python -m pip install -e ".[tracking,dev]"
 pytest -q
 ```
-
-## Branch purpose
-
-Do not merge optimization experiments into this branch. `Ixcononly` is meant
-to remain a small, reproducible laboratory for mathematical comparisons between
-invariant constructors.
