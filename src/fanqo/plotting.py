@@ -77,6 +77,7 @@ def plot_invariance_map(
     show=False,
     vmin=-14.0,
     vmax=0.0,
+    delta=0.0,
 ):
     """Plot log10 invariant drift for one method."""
     plt = get_pyplot(show)
@@ -120,7 +121,10 @@ def plot_invariance_map(
     ax.set_xlabel(r"$x_0$ [mm]")
     ax.set_ylabel(r"$y_0$ [mm]")
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(f"{method}: horizontal invariant tracking")
+    ax.set_title(
+        f"{method}: horizontal invariant tracking | "
+        + rf"$\delta={float(delta):g}$"
+    )
     ax.grid(alpha=0.2)
     fig.tight_layout()
 
@@ -142,6 +146,7 @@ def plot_comparison_map(
     output_path,
     *,
     show=False,
+    delta=0.0,
 ):
     """Plot log10(D2)-log10(D1): red=name1 better, blue=name2 better."""
     plt = get_pyplot(show)
@@ -177,7 +182,10 @@ def plot_comparison_map(
     ax.set_xlabel(r"$x_0$ [mm]")
     ax.set_ylabel(r"$y_0$ [mm]")
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(f"{name1} vs {name2}")
+    ax.set_title(
+        f"{name1} vs {name2} | "
+        + rf"$\delta={float(delta):g}$"
+    )
     ax.grid(alpha=0.2)
     fig.tight_layout()
 
