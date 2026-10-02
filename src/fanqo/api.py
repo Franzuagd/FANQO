@@ -98,7 +98,6 @@ def _clear_derived():
     STATE.Iy = None
     STATE.invariant_details = None
     STATE.optimization_result = None
-    STATE.a_box_result = None
     STATE.diagnostics.clear()
 
 
