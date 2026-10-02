@@ -4,51 +4,44 @@ import sympy as sp
 from fanqo.core import nonlinear as nl
 
 
-def test_a_box_y_zero_builds_horizontal_only_basis():
+def test_a_box_y0_uses_full_basis_and_horizontal_coefficient_mask():
     delta, x, y, px, py = sp.symbols("delta x y px py")
     b1, b2, b3, b4, b5 = sp.symbols("b1 b2 b3 b4 b5")
 
-    # Include an explicit x-y coupling term. It must disappear from the reduced
-    # y=py=0 polynomial representation because the slice is built algebraically,
-    # not by replacing y with a very small nonzero scale.
     hamiltonian = (
         px**2 / 2
-        + b2 * x**2 / 2
-        + b3 * x**3 / 6
-        + b3 * x * y**2
-        + b4 * x**4 / 24
+        + b2 * (x**2 - y**2) / 2
+        + b3 * (x**3 - 3*x*y**2) / 3
+        + b4 * (x**4 - 6*x**2*y**2 + y**4) / 4
     )
 
-    state = nl.load(
+    data = [np.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0])]
+    state = nl.initialize_nonlinear_for_method(
+        data=data,
         m=4,
         d=1,
         hamiltonian=hamiltonian,
-        a_box=np.array([0.01, 10e-3, 0.0, 1e-3, 0.8e-3]),
+        a_box=np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3]),
         variables=(delta, x, y, px, py),
         field_symbols=(b1, b2, b3, b4, b5),
         n=2,
+        invariant_construction="a_box_y0",
     )
 
-    assert state["horizontal_slice_only"] is True
-    assert state["active_variables"] == ("delta", "x", "px")
-    assert state["a_box"][2] == 0.0
-    assert state["a_box"][4] == 0.0
+    # Same full basis as every other construction:
+    # degree <= 4 in four transverse variables gives C(8,4)=70 terms/layer.
+    assert len(state["idx_to_vec"]) == 140
+    assert state["quad_size"] == 15
+    assert state["nonquad_size"] == 125
+    assert (0, 1, 2, 0, 0) in state["vec_to_idx"]
 
-    # Degree <=4 in two transverse variables has 1+2+3+4+5 = 15 monomials
-    # per delta layer. DELTA_ORDER=1 therefore gives 30 coefficients.
-    assert len(state["idx_to_vec"]) == 30
-    assert state["G"].shape == (30, 30)
-
-    # The delta=0 quadratic block in (x,px) contains 1+2+3 = 6 monomials.
-    assert state["quad_size"] == 6
-    assert state["nonquad_size"] == 24
-
-    # Public exponent labels remain [delta,x,y,px,py], but y and py powers are
-    # identically zero throughout the reduced basis.
-    for powers in state["idx_to_vec"].values():
-        assert len(powers) == 5
+    # The constructor restriction is a coefficient mask, not a different basis.
+    positions = nl.horizontal_nonquad_positions(state)
+    assert len(positions) > 0
+    q = state["quad_size"]
+    for position in positions:
+        powers = state["idx_to_vec"][q + int(position)]
         assert powers[2] == 0
         assert powers[4] == 0
 
-    # Cross-plane Hamiltonian monomials cannot survive the reduced basis.
-    assert (0, 1, 2, 0, 0) not in state["vec_to_idx"]
+    assert state["horizontal_only"] is True
