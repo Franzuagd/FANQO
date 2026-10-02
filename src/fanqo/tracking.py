@@ -180,13 +180,25 @@ def _cache_signature(config, lattice_cfg, context):
 
 
 def _dominant_tune(signal):
-    signal = np.asarray(signal, dtype=np.complex128)
-    n = len(signal)
-    if n < 16 or not np.all(np.isfinite(signal)):
+    """AT harmonic-analysis tune, with a simple FFT fallback."""
+    signal = np.asarray(signal, dtype=float)
+    if len(signal) < 16 or not np.all(np.isfinite(signal)):
         return np.nan
     signal = signal - np.mean(signal)
-    spectrum = np.abs(np.fft.fft(signal))
-    frequency = np.fft.fftfreq(n)
+
+    try:
+        from at.physics.harmonic_analysis import get_tunes_harmonic
+        tune = np.asarray(
+            get_tunes_harmonic(signal, method="interp_fft"),
+            dtype=float,
+        ).reshape(-1)
+        if tune.size and np.isfinite(tune[0]):
+            return float(tune[0])
+    except (ImportError, AttributeError, TypeError, ValueError):
+        pass
+
+    spectrum = np.abs(np.fft.rfft(signal))
+    frequency = np.fft.rfftfreq(len(signal))
     mask = (frequency > 0.0) & (frequency < 0.5)
     if not np.any(mask):
         return np.nan
@@ -195,23 +207,27 @@ def _dominant_tune(signal):
 
 
 def _fma_from_trajectory(trajectory):
-    """Return Qx1,Qx2,Qy1,Qy2,log10 diffusion from one trajectory."""
+    """AT-style split-window frequency-map summary from saved tracking."""
     z = np.asarray(trajectory, dtype=float)
     n = z.shape[1]
     half = n // 2
     if half < 16:
         return (np.nan,) * 5
 
-    qx1 = _dominant_tune(z[0, :half] + 1j * z[1, :half])
-    qx2 = _dominant_tune(z[0, -half:] + 1j * z[1, -half:])
-    qy1 = _dominant_tune(z[2, :half] + 1j * z[3, :half])
-    qy2 = _dominant_tune(z[2, -half:] + 1j * z[3, -half:])
+    qx1 = _dominant_tune(z[0, :half])
+    qx2 = _dominant_tune(z[0, -half:])
+    qy1 = _dominant_tune(z[2, :half])
+    qy2 = _dominant_tune(z[2, -half:])
 
     if not np.all(np.isfinite([qx1, qx2, qy1, qy2])):
         diffusion = np.nan
     else:
-        dq = math.hypot(qx2 - qx1, qy2 - qy1)
-        diffusion = math.log10(max(dq, 1e-16))
+        dqx = qx2 - qx1
+        dqy = qy2 - qy1
+        diffusion = 0.5 * math.log10(
+            max((dqx * dqx + dqy * dqy) / float(half), 1e-20)
+        )
+        diffusion = float(np.clip(diffusion, -10.0, -2.0))
     return qx1, qx2, qy1, qy2, diffusion
 
 
