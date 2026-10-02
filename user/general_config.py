@@ -91,8 +91,12 @@ ABEL_RHO = 0.98
 
 
 # Tracking --------------------------------------------------------------------
+# Same launch-grid convention used by AT fmap_parallel_track:
+# TRACKING_STEPS is the number of intervals, so [121,121] gives 122x122 points.
 TRACKING_COORDS_MM = [-15.0, 15.0, -15.0, 15.0]
 TRACKING_STEPS = [121, 121]
+
+# 512 turns = two 256-turn FMA windows and the full 512-turn Ix test.
 TRACKING_TURNS = 512
 TRACKING_DELTA = 0.0
 TRACKING_NUM_INT_STEPS = 10
@@ -103,6 +107,8 @@ TRACKING_POOL_SIZE = None
 TRACKING_CACHE = Path("ix_construction_output/tracking_cache")
 
 IX_INVARIANCE_NORM_FLOOR_FRACTION = 1.0e-12
+IX_INVARIANCE_LOG_MIN = -14.0
+IX_INVARIANCE_LOG_MAX = 0.0
 
 
 # Output ----------------------------------------------------------------------
