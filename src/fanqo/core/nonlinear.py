@@ -662,13 +662,21 @@ def least_squares_ix(
     else:
         active = np.asarray(active_positions, dtype=int)
 
-    Ds = D[np.ix_(active, active)]
-    Us = U[active]
+    # Restrict the unknown polynomial coefficients, not the invariance
+    # equations.  This is the scientifically useful interpretation for
+    # a_box_y0: coefficients containing y or py are fixed to zero, while the
+    # residual is still measured in the complete 5-D polynomial space.
+    Ds = D[:, active]
+    Us = U
 
     if weighted:
-        Gs = np.asarray(state["Gnn"], dtype=float)[np.ix_(active, active)]
+        Gs = np.asarray(state["Gnn"], dtype=float)
         L = np.linalg.cholesky(Gs)
-        hs, _, rank, singular = np.linalg.lstsq(L.T @ Ds, L.T @ Us, rcond=tol)
+        hs, _, rank, singular = np.linalg.lstsq(
+            L.T @ Ds,
+            L.T @ Us,
+            rcond=tol,
+        )
     else:
         hs, _, rank, singular = np.linalg.lstsq(Ds, Us, rcond=tol)
 
