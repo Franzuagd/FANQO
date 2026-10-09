@@ -615,7 +615,12 @@ def quadratic_invariants(data, state):
         i = v[powers]
         Sx[i] = physical / C[i]
 
-    if state.get("horizontal_slice_only", False):
+    # Small horizontal-only research bases need not contain vertical monomials.
+    if state.get("horizontal_slice_only", False) or any(
+        powers not in v for powers in (
+            (0, 0, 2, 0, 0), (0, 0, 1, 0, 1), (0, 0, 0, 0, 2)
+        )
+    ):
         return Sx, None
 
     Sy = np.zeros(q, dtype=float)
@@ -951,6 +956,7 @@ def graded_least_squares_ix(transfer, data, state, tol=1e-14):
 
     return invariant_stored, {
         "fixed_quadratic": "Sx",
+        "a_box_independent": True,
         "grading": "(delta_degree, transverse_degree)",
         "block_order": "(total_degree, delta_degree)",
         "coordinate_system": "Courant-Snyder normalized transverse coordinates",
@@ -980,6 +986,7 @@ def cesaro_invariant(tnn, tnq, Sx, state, terms=64):
         "fixed_quadratic": "Sx",
         "terms": terms,
         "residual": float(np.linalg.norm(residual)),
+        "residual_identity_error": float(np.linalg.norm(residual - h / float(terms))),
     }
 
 
@@ -1002,6 +1009,8 @@ def abel_invariant(tnn, tnq, Sx, state, rho=0.98, tol=1e-14):
         "rho": rho,
         "solver": solver,
         "residual": float(np.linalg.norm(A @ h - b)),
+        "resolvent_residual": float(np.linalg.norm(A @ h - b)),
+        "residual_identity_error": float(np.linalg.norm(h - rho * (forcing + np.asarray(tnn) @ h))),
     }
 
 
