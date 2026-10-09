@@ -66,6 +66,7 @@ def create_context(
     field_symbols,
     n_planes=2,
     invariant_construction="a_box",
+    method_options=None,
 ):
     # Build a self-consistent linear lattice first. When chromatic
     # correction is enabled, corrected family strengths are written into p.
@@ -94,6 +95,7 @@ def create_context(
         field_symbols=field_symbols,
         n=n_planes,
         invariant_construction=invariant_construction,
+        method_options=method_options,
     )
 
     # The context joins linear and nonlinear state. It is mutated in place
@@ -137,10 +139,10 @@ def create_context(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
-    if state.get("invariant_construction", "a_box") == "eigen":
+    if state.get("invariant_construction", "a_box") != "a_box":
         state["linear_cs0"] = cs0.copy()
-        # C is the identity in eigen mode, so coefficient derivatives do not
-        # change when the linear Twiss parameters change.
+        # C is fixed (identity for eigen, box scaling for pair methods),
+        # so coefficient derivatives do not change with the Twiss parameters.
         return
     bx0, ax0, gx0, _, _, _ = cs0
 
@@ -378,6 +380,16 @@ def prepare_objective_data(
         if "tnq" in requirements:
             result["tnq"] = tnq
         method = state.get("invariant_construction", "a_box")
+        from .structured_invariants import PAIR_METHODS, construct_pair
+        if method in PAIR_METHODS and requirements & {"Ix", "Iy"}:
+            ix, iy, diagnostics = construct_pair(transfer, context["data"], state, tol)
+            if "Ix" in requirements:
+                result["Ix"] = ix
+                result["Ix_construction_details"] = diagnostics
+            if "Iy" in requirements:
+                result["Iy"] = iy
+                result["Iy_construction_details"] = diagnostics
+            return result
         if "Ix" in requirements:
             if method == "eigen":
                 result["Ix"], result["Ix_construction_details"] = (
@@ -416,7 +428,7 @@ def compute_requested_invariants(context, tol, *, compute_ix=True, compute_iy=Fa
         compute_ix=compute_ix,
         compute_iy=compute_iy,
     )
-    return {key: data[key] for key in ("Ix", "Iy") if key in data}
+    return {key: data[key] for key in ("Ix", "Iy", "Ix_construction_details", "Iy_construction_details") if key in data}
 
 
 def _call_objective(Fobj, data, objective_kwargs=None):
@@ -858,3 +870,4 @@ def hybrid_optimize(
         "final_plots": final_plots,
         "context": context,
     }
+

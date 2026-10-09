@@ -72,6 +72,24 @@ N_PLANES = 2
 #            continuation by weighted least squares.
 # "eigen" -> diagonalize T-I and select/normalize a near-fixed eigenvector.
 INVARIANT_CONSTRUCTION = "a_box"
+# Additional options: a_box_coupled_fixed, a_box_coupled_regularized,
+# graded_coupled, canonical_graded. Pair methods construct auxiliary Iy even
+# when COMPUTE_IY=False. Existing eigen/a_box behavior is unchanged.
+INVARIANT_OPTIONS = {
+    "a_box_coupled_fixed": {
+        "COUPLED_BRACKET_WEIGHT": 1.0,
+        "COUPLED_NONLINEAR_WEIGHT": 1e-3,
+        "COUPLED_MAX_ITER": 200,
+    },
+    "a_box_coupled_regularized": {
+        "COUPLED_BRACKET_WEIGHT": 1.0,
+        "COUPLED_QUADRATIC_WEIGHT": 10.0,
+        "COUPLED_NONLINEAR_WEIGHT": 1e-3,
+        "COUPLED_MAX_ITER": 200,
+    },
+    "graded_coupled": {"STRUCTURED_BRACKET_WEIGHT": 1.0, "STRUCTURED_RIDGE": 1e-10},
+    "canonical_graded": {"STRUCTURED_RIDGE": 1e-10},
+}
 
 # 7. NORMALIZATION / PHYSICAL BOX
 # A_BOX is fixed for the full experiment. This branch deliberately does not
@@ -246,3 +264,4 @@ REPORT_FILE = OUTPUT_ROOT / "optimization_report.txt"
 FINAL_LATTICE_FILE = OUTPUT_ROOT / "final_lattice.json"
 PLOT_ROOT = OUTPUT_ROOT / "slices"
 FMA_OUTPUT_DIRECTORY = OUTPUT_ROOT / "FMA"
+

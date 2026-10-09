@@ -172,6 +172,9 @@ def _build_context(parameters):
         field_symbols=cfg.FIELD_SYMBOLS,
         n_planes=cfg.N_PLANES,
         invariant_construction=cfg.INVARIANT_CONSTRUCTION,
+        method_options=getattr(cfg, "INVARIANT_OPTIONS", {}).get(
+            str(cfg.INVARIANT_CONSTRUCTION).lower(), {}
+        ),
     )
 
 
@@ -346,7 +349,8 @@ def compute_invariants():
 
     The actual constructor is selected inside the nonlinear state:
     a_box uses weighted least squares; eigen diagonalizes the one-turn map.
-    The public return representation is the same in both cases.
+    Pair methods construct auxiliary Iy even when only Ix is requested.
+    The public return representation is the same for all methods.
     """
     cfg = _cfg()
     context = _require_context("compute_invariants()")
@@ -1238,3 +1242,4 @@ def save_current_lattice(file_name=None):
     context=_require_context("save_current_lattice()"); cfg=_cfg()
     file_name=cfg.FINAL_LATTICE_FILE if file_name is None else file_name
     return opt.save_final_lattice(_resolve(file_name),context)
+

@@ -1,0 +1,563 @@
+{
+  "order": 4,
+  "delta_order": 1,
+  "basis_size": 140,
+  "repeats": 3,
+  "python": "3.12.14",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "numpy": "2.3.5",
+  "scipy": "1.17.0",
+  "timing_scope": "warm constructor only; setup, map building, external comparison diagnostics and tracking excluded; includes constructor diagnostics",
+  "eigen_scope": "Ix only; pair methods solve Ix and auxiliary Iy",
+  "linear_seconds": 0.06093538699997225,
+  "box_setup_seconds": 0.10563848199990389,
+  "box_map_seconds": 0.06477347000009104,
+  "eigen_setup_seconds": 0.1447171720001279,
+  "eigen_map_seconds": 0.06589855299989722,
+  "map_similarity_relative_error": 1.1233752336581091e-10,
+  "parameters": {
+    "energy": 3.0,
+    "LSD": 0.1,
+    "F": 0.8,
+    "X1": 3.633167514008421,
+    "X2": -4.258277621861492,
+    "X3": -2.690860661253351,
+    "X4": 2.754505457254375,
+    "X5": -3.336431720192718,
+    "X6": -1.492176552197721,
+    "X7": 0.002943728718874649,
+    "X8": 0.6010287762639231,
+    "X9": 0.5370545478298007,
+    "kse1": 0.0,
+    "kfd2": 0.0,
+    "kfd3": 0.0,
+    "ks1": 0.0,
+    "ks2": 0.0,
+    "ksd3": 0.0,
+    "ks1s": 0.0,
+    "ks2s": 0.0,
+    "ksf1": 42.721772698660175,
+    "ksd1": -99.94606443088693,
+    "ko1": 0.0,
+    "ko2": 0.0,
+    "ko3": 0.0
+  },
+  "a_box": [
+    0.01,
+    0.01,
+    0.008,
+    0.001,
+    0.0008
+  ],
+  "analysis_cells": 1,
+  "deltas": [
+    0.0,
+    -0.01,
+    0.01
+  ],
+  "turns": 64,
+  "grid_points_per_axis": 7,
+  "extent_mm": 10.0,
+  "methods": {
+    "eigen": {
+      "timing": {
+        "method": "eigen",
+        "median_seconds": 0.00765159999991738,
+        "min_seconds": 0.007427947999985918,
+        "max_seconds": 0.008845674999975017,
+        "iterations": null,
+        "solver_success": null,
+        "relative_homological_x": 9.555427674564928e-09,
+        "quadratic_relative_error_x": 0.10402570233263761
+      },
+      "seconds": [
+        0.00765159999991738,
+        0.007427947999985918,
+        0.008845674999975017
+      ],
+      "details": {
+        "reference_selection_residual": 2.291889811629567e-15,
+        "eigenvalue_residual": 3.6381741699316345e-14,
+        "reference_candidate_count": 6,
+        "eigen_cutoff": 1e-10
+      },
+      "options": {
+        "COUPLED_MAX_ITER": 200,
+        "COUPLED_FIX_QUADRATIC": false
+      }
+    },
+    "a_box_coupled_fixed": {
+      "timing": {
+        "method": "a_box_coupled_fixed",
+        "median_seconds": 0.019531298999936553,
+        "min_seconds": 0.019409348999943177,
+        "max_seconds": 0.02030594400002883,
+        "iterations": 91,
+        "solver_success": true,
+        "relative_homological_x": 0.30110279313496413,
+        "quadratic_relative_error_x": 0.0,
+        "homological_x": 2.852400343882731e-06,
+        "homological_y": 2.273790842597168e-06,
+        "relative_homological_y": 0.2590570484717233,
+        "poisson_bracket": 8.351204428566577e-09,
+        "relative_poisson_bracket": 0.0009158486655201414,
+        "quadratic_error_x": 0.0,
+        "quadratic_error_y": 0.0,
+        "central_coefficient_norm_x": 3.269022515921502e-09,
+        "central_coefficient_norm_y": 1.6740050671987544e-09
+      },
+      "seconds": [
+        0.02030594400002883,
+        0.019409348999943177,
+        0.019531298999936553
+      ],
+      "details": {
+        "method": "a_box_coupled_fixed",
+        "quadratic_fixed": true,
+        "quadratic_mixing_x": 0.0,
+        "quadratic_mixing_y": 0.0,
+        "quadratic_mixing_determinant": 1.0,
+        "homological_x": 2.8524003438829417e-06,
+        "homological_y": 2.2737908425968602e-06,
+        "poisson_bracket": 8.351204428566577e-09,
+        "relative_quadratic_x": 0.0,
+        "relative_quadratic_y": 0.0,
+        "relative_nonlinear_x": 8.214693512540861e-05,
+        "relative_nonlinear_y": 6.742082748282731e-05,
+        "objective": 2.4600069189243526e-11,
+        "solver_status": 0,
+        "solver_success": true,
+        "solver_message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+        "nfev": 103,
+        "nit": 91,
+        "optimality": 0.0027759021756120984,
+        "bracket_terms": 4716,
+        "bracket_truncated_to_basis": true,
+        "nullity_D": null,
+        "nullity_D_note": "Large SVD omitted; run separate rank diagnostic",
+        "weights": {
+          "bracket": 1.0,
+          "quadratic": 10.0,
+          "nonlinear": 0.001
+        }
+      },
+      "options": {
+        "COUPLED_MAX_ITER": 200,
+        "COUPLED_FIX_QUADRATIC": true
+      }
+    },
+    "a_box_coupled_regularized": {
+      "timing": {
+        "method": "a_box_coupled_regularized",
+        "median_seconds": 0.019899142000213033,
+        "min_seconds": 0.019776791999902343,
+        "max_seconds": 0.020019660999878397,
+        "iterations": 91,
+        "solver_success": true,
+        "relative_homological_x": 0.3011027931349651,
+        "quadratic_relative_error_x": 3.5009680594487103e-17,
+        "homological_x": 2.8524003438827397e-06,
+        "homological_y": 2.273790842597169e-06,
+        "relative_homological_y": 0.2590570484717234,
+        "poisson_bracket": 8.351204428552459e-09,
+        "relative_poisson_bracket": 0.0009158486655185931,
+        "quadratic_error_x": 3.3165293462481546e-22,
+        "quadratic_error_y": 1.6490163146676017e-22,
+        "central_coefficient_norm_x": 3.269022515918491e-09,
+        "central_coefficient_norm_y": 1.6740050672000797e-09
+      },
+      "seconds": [
+        0.019776791999902343,
+        0.019899142000213033,
+        0.020019660999878397
+      ],
+      "details": {
+        "method": "a_box_coupled_regularized",
+        "quadratic_fixed": false,
+        "quadratic_mixing_x": 3.778581070489051e-17,
+        "quadratic_mixing_y": -1.7407213518831108e-17,
+        "quadratic_mixing_determinant": 1.0,
+        "homological_x": 2.8524003438829506e-06,
+        "homological_y": 2.2737908425968615e-06,
+        "poisson_bracket": 8.351204428552459e-09,
+        "relative_quadratic_x": 3.5009680594487103e-17,
+        "relative_quadratic_y": 1.8787537154101798e-17,
+        "relative_nonlinear_x": 8.214693512534456e-05,
+        "relative_nonlinear_y": 6.742082748289248e-05,
+        "objective": 2.460006918924185e-11,
+        "solver_status": 0,
+        "solver_success": true,
+        "solver_message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+        "nfev": 103,
+        "nit": 91,
+        "optimality": 0.0027759021755972835,
+        "bracket_terms": 4716,
+        "bracket_truncated_to_basis": true,
+        "nullity_D": null,
+        "nullity_D_note": "Large SVD omitted; run separate rank diagnostic",
+        "weights": {
+          "bracket": 1.0,
+          "quadratic": 10.0,
+          "nonlinear": 0.001
+        }
+      },
+      "options": {
+        "COUPLED_MAX_ITER": 200,
+        "COUPLED_FIX_QUADRATIC": false
+      }
+    },
+    "graded_coupled": {
+      "timing": {
+        "method": "graded_coupled",
+        "median_seconds": 0.00375915700033147,
+        "min_seconds": 0.003684675999920728,
+        "max_seconds": 0.003919652999684331,
+        "iterations": null,
+        "solver_success": null,
+        "relative_homological_x": 0.024007471363793702,
+        "quadratic_relative_error_x": 0.0,
+        "homological_x": 2.274270486197233e-07,
+        "homological_y": 1.2864248755165044e-07,
+        "relative_homological_y": 0.01465646818030354,
+        "poisson_bracket": 2.2670458041499615e-07,
+        "relative_poisson_bracket": 0.024861933295532494,
+        "quadratic_error_x": 0.0,
+        "quadratic_error_y": 0.0,
+        "central_coefficient_norm_x": 0.0,
+        "central_coefficient_norm_y": 0.0
+      },
+      "seconds": [
+        0.003919652999684331,
+        0.00375915700033147,
+        0.003684675999920728
+      ],
+      "details": {
+        "method": "graded_coupled",
+        "blocks": [
+          {
+            "grade": [
+              1,
+              1
+            ],
+            "unknowns": 8,
+            "rank": 8,
+            "weighted_residual": 5.186245140611439e-09
+          },
+          {
+            "grade": [
+              0,
+              3
+            ],
+            "unknowns": 40,
+            "rank": 40,
+            "weighted_residual": 4.172692992734223e-06
+          },
+          {
+            "grade": [
+              1,
+              2
+            ],
+            "unknowns": 20,
+            "rank": 20,
+            "weighted_residual": 7.094494751920592e-07
+          },
+          {
+            "grade": [
+              0,
+              4
+            ],
+            "unknowns": 70,
+            "rank": 70,
+            "weighted_residual": 1.062375155718006e-06
+          },
+          {
+            "grade": [
+              1,
+              3
+            ],
+            "unknowns": 40,
+            "rank": 40,
+            "weighted_residual": 2.073741221123747e-06
+          },
+          {
+            "grade": [
+              1,
+              4
+            ],
+            "unknowns": 70,
+            "rank": 70,
+            "weighted_residual": 0.03754046452002787
+          }
+        ],
+        "triangular_leakage": 0.0,
+        "ridge": 1e-10,
+        "bracket_weight": 1.0,
+        "bracket_exact_by_construction": false,
+        "homological_x": 2.274270486197233e-07,
+        "homological_y": 1.2864248755165047e-07,
+        "relative_homological_x": 0.024007471363793702,
+        "relative_homological_y": 0.014656468180303542,
+        "poisson_bracket": 2.2670458041499615e-07,
+        "relative_poisson_bracket": 0.024861933295532494,
+        "quadratic_error_x": 0.0,
+        "quadratic_error_y": 0.0,
+        "central_coefficient_norm_x": 0.0,
+        "central_coefficient_norm_y": 0.0
+      },
+      "options": {
+        "COUPLED_MAX_ITER": 200,
+        "COUPLED_FIX_QUADRATIC": false
+      }
+    },
+    "canonical_graded": {
+      "timing": {
+        "method": "canonical_graded",
+        "median_seconds": 0.002196866999838676,
+        "min_seconds": 0.0021742240001003665,
+        "max_seconds": 0.002374028999838629,
+        "iterations": null,
+        "solver_success": null,
+        "relative_homological_x": 0.09849749670420087,
+        "quadratic_relative_error_x": 0.0,
+        "homological_x": 9.330843149791633e-07,
+        "homological_y": 3.6609733558626946e-07,
+        "relative_homological_y": 0.04171012277541445,
+        "poisson_bracket": 1.8839179101090415e-21,
+        "relative_poisson_bracket": 2.0660297789153854e-16,
+        "quadratic_error_x": 0.0,
+        "quadratic_error_y": 0.0,
+        "central_coefficient_norm_x": 0.0,
+        "central_coefficient_norm_y": 0.0
+      },
+      "seconds": [
+        0.002196866999838676,
+        0.0021742240001003665,
+        0.002374028999838629
+      ],
+      "details": {
+        "method": "canonical_graded",
+        "blocks": [
+          {
+            "grade": [
+              0,
+              3
+            ],
+            "unknowns": 20,
+            "rank": 20,
+            "weighted_residual": 4.172692993472369e-06
+          },
+          {
+            "grade": [
+              1,
+              2
+            ],
+            "unknowns": 10,
+            "rank": 8,
+            "weighted_residual": 7.667045369548333e-05
+          },
+          {
+            "grade": [
+              0,
+              4
+            ],
+            "unknowns": 35,
+            "rank": 32,
+            "weighted_residual": 2.2804845934920918e-06
+          },
+          {
+            "grade": [
+              1,
+              3
+            ],
+            "unknowns": 20,
+            "rank": 20,
+            "weighted_residual": 8.71832683357086e-06
+          },
+          {
+            "grade": [
+              1,
+              4
+            ],
+            "unknowns": 35,
+            "rank": 32,
+            "weighted_residual": 0.10700092457991696
+          }
+        ],
+        "triangular_leakage": 0.0,
+        "ridge": 1e-10,
+        "bracket_exact_by_construction": true,
+        "dispersion_linear_terms_included": false,
+        "generator_count": 5,
+        "homological_x": 9.330843149791633e-07,
+        "homological_y": 3.6609733558626956e-07,
+        "relative_homological_x": 0.09849749670420087,
+        "relative_homological_y": 0.041710122775414464,
+        "poisson_bracket": 1.7882109196339206e-21,
+        "relative_poisson_bracket": 1.9610711226432943e-16,
+        "quadratic_error_x": 0.0,
+        "quadratic_error_y": 0.0,
+        "central_coefficient_norm_x": 0.0,
+        "central_coefficient_norm_y": 0.0
+      },
+      "options": {
+        "COUPLED_MAX_ITER": 200,
+        "COUPLED_FIX_QUADRATIC": false
+      }
+    }
+  },
+  "tracking": [
+    {
+      "delta": 0.0,
+      "physical_ring_cells": 20,
+      "quality": [
+        {
+          "method": "eigen",
+          "delta": 0.0,
+          "launched": 49,
+          "survived": 20,
+          "median_max_drift": 1.4166034048302325,
+          "p90_max_drift": 70606.39442611147,
+          "worst_max_drift": 649701.6693175862
+        },
+        {
+          "method": "a_box_coupled_fixed",
+          "delta": 0.0,
+          "launched": 49,
+          "survived": 20,
+          "median_max_drift": 0.5762273198799973,
+          "p90_max_drift": 13568.999272498715,
+          "worst_max_drift": 105944.29594487138
+        },
+        {
+          "method": "a_box_coupled_regularized",
+          "delta": 0.0,
+          "launched": 49,
+          "survived": 20,
+          "median_max_drift": 0.5762273198799968,
+          "p90_max_drift": 13568.999272498726,
+          "worst_max_drift": 105944.29594487135
+        },
+        {
+          "method": "graded_coupled",
+          "delta": 0.0,
+          "launched": 49,
+          "survived": 20,
+          "median_max_drift": 0.16699717915762494,
+          "p90_max_drift": 6059.050945686647,
+          "worst_max_drift": 57581.87595908062
+        },
+        {
+          "method": "canonical_graded",
+          "delta": 0.0,
+          "launched": 49,
+          "survived": 20,
+          "median_max_drift": 0.17920495210615764,
+          "p90_max_drift": 3604.533341331739,
+          "worst_max_drift": 33223.70664464254
+        }
+      ]
+    },
+    {
+      "delta": -0.01,
+      "physical_ring_cells": 20,
+      "quality": [
+        {
+          "method": "eigen",
+          "delta": -0.01,
+          "launched": 49,
+          "survived": 19,
+          "median_max_drift": 6.0110954911599865,
+          "p90_max_drift": 199980.0223369092,
+          "worst_max_drift": 829967.7566268069
+        },
+        {
+          "method": "a_box_coupled_fixed",
+          "delta": -0.01,
+          "launched": 49,
+          "survived": 19,
+          "median_max_drift": 1.9989383553979254,
+          "p90_max_drift": 39276.94042303563,
+          "worst_max_drift": 159659.07163288986
+        },
+        {
+          "method": "a_box_coupled_regularized",
+          "delta": -0.01,
+          "launched": 49,
+          "survived": 19,
+          "median_max_drift": 1.998938355397936,
+          "p90_max_drift": 39276.94042303598,
+          "worst_max_drift": 159659.07163289268
+        },
+        {
+          "method": "graded_coupled",
+          "delta": -0.01,
+          "launched": 49,
+          "survived": 19,
+          "median_max_drift": 1.6416009555078077,
+          "p90_max_drift": 79499.74165466928,
+          "worst_max_drift": 334465.2282075247
+        },
+        {
+          "method": "canonical_graded",
+          "delta": -0.01,
+          "launched": 49,
+          "survived": 19,
+          "median_max_drift": 1.4643105074285736,
+          "p90_max_drift": 23713.59454910798,
+          "worst_max_drift": 109681.8339026748
+        }
+      ]
+    },
+    {
+      "delta": 0.01,
+      "physical_ring_cells": 20,
+      "quality": [
+        {
+          "method": "eigen",
+          "delta": 0.01,
+          "launched": 49,
+          "survived": 23,
+          "median_max_drift": 1.1138515617872338,
+          "p90_max_drift": 77607.51856025633,
+          "worst_max_drift": 1299036.8174134954
+        },
+        {
+          "method": "a_box_coupled_fixed",
+          "delta": 0.01,
+          "launched": 49,
+          "survived": 23,
+          "median_max_drift": 0.6518394823415826,
+          "p90_max_drift": 216.98796492875132,
+          "worst_max_drift": 27896.75372998915
+        },
+        {
+          "method": "a_box_coupled_regularized",
+          "delta": 0.01,
+          "launched": 49,
+          "survived": 23,
+          "median_max_drift": 0.6518394823415554,
+          "p90_max_drift": 216.98796492857457,
+          "worst_max_drift": 27896.75372998597
+        },
+        {
+          "method": "graded_coupled",
+          "delta": 0.01,
+          "launched": 49,
+          "survived": 23,
+          "median_max_drift": 1.4284388731886017,
+          "p90_max_drift": 11747.240616930585,
+          "worst_max_drift": 175617.43143745582
+        },
+        {
+          "method": "canonical_graded",
+          "delta": 0.01,
+          "launched": 49,
+          "survived": 23,
+          "median_max_drift": 1.5178846658623555,
+          "p90_max_drift": 1082.546578704541,
+          "worst_max_drift": 28564.419410829807
+        }
+      ]
+    }
+  ]
+}

@@ -785,6 +785,7 @@ def initialize_nonlinear_for_method(
     field_symbols,
     n=2,
     invariant_construction="a_box",
+    method_options=None,
 ):
     """Dispatch to one of FANQO's invariant representations."""
     method = str(invariant_construction).lower()
@@ -796,9 +797,25 @@ def initialize_nonlinear_for_method(
         return initialize_nonlinear_eigen(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
-    raise ValueError(
-        "invariant_construction must be 'a_box' or 'eigen'."
-    )
+    from .structured_invariants import PAIR_METHODS
+    if method in PAIR_METHODS:
+        state = initialize_nonlinear(
+            data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
+        )
+        if state.get("horizontal_slice_only", False):
+            raise ValueError("Coupled constructions require positive two-plane A_BOX widths.")
+        # New methods use the physical normalized-box basis from Ixcononly.
+        # The legacy a_box extra global CS scaling is intentionally untouched.
+        state["C"] = state["epsilon"].copy()
+        state["invariant_construction"] = method
+        state["method_options"] = dict(method_options or {})
+        if method == "a_box_coupled_fixed":
+            state["method_options"]["COUPLED_FIX_QUADRATIC"] = True
+        elif method == "a_box_coupled_regularized":
+            state["method_options"]["COUPLED_FIX_QUADRATIC"] = False
+        return state
+    raise ValueError(f"Unknown invariant_construction {method!r}.")
+
 
 
 def quadratic_invariants(data, state):
@@ -1101,6 +1118,11 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
             "Iy_details": y_details,
         }
         return Ix, Iy, result, transfer
+
+    from .structured_invariants import PAIR_METHODS, construct_pair
+    if method in PAIR_METHODS:
+        Ix, Iy, details = construct_pair(transfer, data, state, tol)
+        return Ix, Iy, details, transfer
 
     Sx, Sy = quadratic_invariants(data, state)
     if state.get("horizontal_slice_only", False):
@@ -1461,3 +1483,4 @@ def transfer_checks(transfer, state):
         "upper_right_norm": float(np.linalg.norm(upper_right)),
         "transfer_finite": bool(np.all(np.isfinite(transfer))),
     }
+
