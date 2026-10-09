@@ -1,0 +1,39 @@
+name: Small coupled timing
+on:
+  push:
+    paths: [.github/workflows/coupled-small-timing.yml]
+  workflow_dispatch:
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - name: Benchmark m4
+        working-directory: user
+        run: |
+          python -u - <<'PY'
+          import time, tempfile, pathlib
+          import fanqo as fq
+          base=pathlib.Path("general_config.py").resolve()
+          original=base.read_text()
+          edited=original.replace("ORDER = 8", "ORDER = 4")
+          with tempfile.NamedTemporaryFile(mode="w",suffix=".py",prefix="benchmark_",dir=base.parent,delete=False) as f:
+              f.write(edited)
+              config=f.name
+          try:
+              t=time.perf_counter()
+              fq.load(config,force=True)
+              print("LOAD_SECONDS",round(time.perf_counter()-t,3),flush=True)
+              for name in ("eigen","a_box_coupled_fixed","a_box_coupled_regularized"):
+                  t=time.perf_counter()
+                  print("START",name,flush=True)
+                  r=fq.construct(name,force=True)
+                  print("DONE",name,"SECONDS",round(time.perf_counter()-t,3),"STATUS",r["details"].get("solver_success"),"NFEV",r["details"].get("nfev"),flush=True)
+          finally:
+              pathlib.Path(config).unlink(missing_ok=True)
+          PY
