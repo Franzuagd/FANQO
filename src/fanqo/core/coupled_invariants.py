@@ -72,7 +72,6 @@ def construct(transfer, tnn, tnq, data, state, tol):
     t = np.asarray(tnq, dtype=float)
     wn = _whitener(state["Gnn"])
     w = _whitener(state["G"])
-    g = np.asarray(state["G"], dtype=float)
 
     sx_full = np.r_[sx, np.zeros(n)]
     sy_full = np.r_[sy, np.zeros(n)]
@@ -143,7 +142,8 @@ def construct(transfer, tnn, tnq, data, state, tol):
         "optimality": float(result.optimality),
         "bracket_terms": int(len(v)),
         "bracket_truncated_to_basis": True,
-        "nullity_D": int(n - np.linalg.matrix_rank(d)),
+        "nullity_D": int(n - np.linalg.matrix_rank(d)) if n <= 200 else None,
+        "nullity_D_note": "Skipped for large matrix" if n > 200 else "Numerical rank diagnostic",
         "weights": {"bracket": lb, "quadratic": ls, "nonlinear": lh},
     }
     return ix, details
