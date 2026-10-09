@@ -17,23 +17,22 @@ For a graded block, the Poisson bracket of two unknown coefficients cannot contr
 
 The legacy `a_box` and `eigen` defaults remain unchanged. New pair methods use the normalized monomial basis consistent with their box Gram matrix. Eigen retains its original basis and selector. The experiment compares physical coefficients in one common basis and reports quadratic seed mismatch, rather than assuming eigen solves the identical constrained problem.
 
-## Local run
+## Local run (existing workflow)
 
-From a checkout of this branch:
+Place `user/run_structured_comparison.py` beside your existing `general_config.py`.
 
 ```bash
-python -m pip install -e '.[tracking]'
-python user/run_structured_comparison.py --small --deltas 0 -.01 .01
-python user/run_structured_comparison.py
+python run_structured_comparison.py
+python run_structured_comparison.py --timing-only
 ```
 
-Alternatively download only `user/run_structured_comparison.py` after updating the installed package. The runner uses a packaged copy of this branch's reference lattice, so no extra local files are needed. To use your own settings add `--config general_config.py`; its `LATTICE_FILE` is resolved relative to that file. The runner's order/grid/turn CLI settings control the experiment.
+The runner uses your ORDER, DELTA_ORDER, A_BOX, LATTICE_FILE, tracking grid and turns unchanged. It calls the same `load`, `compute_invariants`, `plot_invariant`, `plot_invariant_tracking`, `run_fma`, and report functions as the original `user/run.py`. The original FMA/Ix tracking metric and plotting code are reused unchanged. Each constructor starts from the same original configuration. No optimization is performed by this comparison runner; the original optimization runner remains available unchanged.
 
-The default full run uses m=8, d=1, a 25x25 grid, 512 turns and delta=0,+/-0.01. The small run uses m=4,d=1,7x7,64 turns and delta=0. Add `--timing-only` to skip tracking. Constructor repeats default to three and BLAS threads to one. No lattice optimization is performed by this runner. The existing optimization API also accepts the new method names and constructs an auxiliary Iy even if only Ix is requested.
+Use `--config /path/to/general_config.py`, `--methods eigen graded_coupled`, or `--deltas 0 -.01 .01` if needed. The default delta list is the original runner's 0,+/-0.01,+/-0.02,+/-0.03. The timing CSV measures the public `compute_invariants()` call, including map preparation; these numbers are not constructor-only timings.
 
-Set method-specific options with `INVARIANT_OPTIONS` in your configuration. New defaults are `STRUCTURED_BRACKET_WEIGHT=1.0` and `STRUCTURED_RIDGE=1e-10`. The coupled baseline defaults are bracket weight 1, seed-mixing weight 10, nonlinear regularization 1e-3, and maximum 200 iterations. See `user/general_config.py` for their exact option names.
+For maps that violate the graded ordering, the new methods now fit the full residual with nonlinear least squares. No transfer entries are discarded. The coupled fallback fits both coefficient vectors and the exact bracket penalty; the canonical fallback fits a shared safe Lie generator. This fallback can be substantially slower, and its solver convergence status is recorded. The original fast graded path remains for compatible maps. `STRUCTURED_MAX_NFEV` controls the fallback budget (default 200). The canonical generator restrictions above still apply.
 
-Outputs include construction timings, diagnostics, coefficients, shared trajectories, tracking metrics, and comparison plots. Tracking uses the same corrected physical ring and trajectories for every method. The primary metric is maximum absolute invariant drift divided by a fixed initial CS-action scale (with a documented floor in the code); it does not reward a method for changing its own denominator. Lost particles are excluded from the survivor statistic and explicitly counted. Red in the difference plots means lower error than eigen; blue means higher error.
+The following results are archived measurements from the earlier independent benchmark, not measurements of the restored workflow or the new nontriangular fallback.
 
 ## Small measured test
 

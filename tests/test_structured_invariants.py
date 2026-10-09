@@ -98,3 +98,17 @@ def test_bracket_tensor_scale_matches_symbolic_polynomials(problem):
     _,x,y,px,py=state['variables']
     expected=sp.diff(f,x)*sp.diff(g,px)-sp.diff(f,px)*sp.diff(g,x)+sp.diff(f,y)*sp.diff(g,py)-sp.diff(f,py)*sp.diff(g,y)
     assert all(abs(float(c))<1e-11 for c in sp.Poly(sp.expand(physical-expected),x,y,px,py).coeffs())
+
+@pytest.mark.parametrize('method',['graded_coupled','canonical_graded'])
+def test_nontriangular_full_residual_path(problem, method):
+    data,state,sx,sy,_,T=problem
+    state=dict(state,invariant_construction=method,
+               method_options={'STRUCTURED_RIDGE':1e-8,'STRUCTURED_MAX_NFEV':4})
+    T=T.copy()
+    T[state['vec_to_idx'][(1,1,0,0,0)],state['vec_to_idx'][(0,3,0,0,0)]] += .02
+    ix,iy,details=si.construct_pair(T,data,state)
+    assert details['fitting_strategy']=='full_residual_nontriangular'
+    assert np.isfinite(ix).all() and np.isfinite(iy).all()
+    assert np.array_equal(ix[:15],sx[:15])
+    if method=='canonical_graded':
+        assert details['relative_poisson_bracket']<1e-10

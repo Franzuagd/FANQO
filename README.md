@@ -108,4 +108,4 @@ The linear lattice implementation is unchanged from `Development-0.3`.
 
 `graded_coupled` and `canonical_graded` add fast degree-by-degree pair construction and a shared Lie construction with zero projected bracket. The expensive `a_box_coupled_fixed` and `a_box_coupled_regularized` baselines are also available. Existing defaults are unchanged.
 
-Run `python user/run_structured_comparison.py --small` for a short comparison against eigen, or omit `--small` for the m=8 experiment. See [methods, limitations, timings and local run instructions](docs/structured_comparison.md).
+Run `python user/run_structured_comparison.py` to compare using your existing general_config.py and the original FMA, Ix tracking and Poincare workflow. Add `--timing-only` to skip plots. See [methods, limitations, timings and local run instructions](docs/structured_comparison.md).

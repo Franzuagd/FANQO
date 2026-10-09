@@ -112,8 +112,6 @@ def _check_structure(transfer, state):
         order[rows] = t
     forbidden = order[:, None] < order[None, :]
     leakage = float(np.max(np.abs(transfer[forbidden]), initial=0.0))
-    if leakage > 1e-10*max(1., np.max(np.abs(transfer))):
-        raise ValueError("Transfer is not triangular in (total degree, delta degree).")
     return groups, leakage
 
 
@@ -133,6 +131,8 @@ def construct_graded(transfer, data, state, tol=1e-14):
     penalized, not asserted identically zero.
     """
     groups, leakage = _check_structure(transfer, state)
+    if leakage > 1e-10*max(1., np.max(np.abs(transfer))):
+        return _construct_full_residual(transfer, data, state, tol, canonical=False)
     sx, sy = seeds(data, state)
     ix, iy = sx.copy(), sy.copy()
     R = np.asarray(transfer)-np.eye(len(transfer))
@@ -201,6 +201,8 @@ def construct_canonical(transfer, data, state, tol=1e-14):
     to BOTH invariants. This keeps all induced higher-order corrections.
     """
     groups, leakage = _check_structure(transfer, state)
+    if leakage > 1e-10*max(1., np.max(np.abs(transfer))):
+        return _construct_full_residual(transfer, data, state, tol, canonical=True)
     sx, sy = seeds(data, state)
     ix, iy = sx.copy(), sy.copy()
     N = len(ix)
@@ -250,3 +252,46 @@ def construct_pair(transfer, data, state, tol=1e-14):
         iy = details.pop("Iy")
         return ix, iy, {"method": method, **details}
     raise ValueError(f"Unknown pair construction: {method}")
+
+
+def _construct_full_residual(transfer, data, state, tol, *, canonical):
+    """Non-triangular fallback: fit every residual row simultaneously.
+
+    This deliberately costs more than the graded path. No map entry is
+    discarded. Canonical fitting uses one shared finite Lie exponential;
+    the other fit uses the exact bilinear bracket, not a frozen linearization.
+    """
+    from scipy.optimize import least_squares
+    sx, sy = seeds(data, state)
+    R = np.asarray(transfer)-np.eye(len(sx))
+    W = np.linalg.cholesky(state['G']).T
+    nx, ny = _norm(sx, state['G']), _norm(sy, state['G'])
+    lb, ridge = _weights(state)
+    ids = np.array([i for i,a in state['idx_to_vec'].items()
+                    if sum(a[1:]) >= 2 and sum(a) >= 3], dtype=int) if canonical else np.array([
+                        i for i,a in state['idx_to_vec'].items()
+                        if sum(a[1:]) > 0 and not (a[0] == 0 and sum(a[1:]) <= 2)], dtype=int)
+    def unpack(v):
+        if canonical:
+            chi = np.zeros(len(sx)); chi[ids] = v
+            return lie_transform(sx, chi, state), lie_transform(sy, chi, state)
+        ix, iy = sx.copy(), sy.copy()
+        ix[ids] += v[:len(ids)]; iy[ids] += v[len(ids):]
+        return ix, iy
+    def residual(v):
+        ix, iy = unpack(v)
+        parts = [W @ (R @ ix)/nx, W @ (R @ iy)/ny]
+        if not canonical and lb:
+            parts.append(math.sqrt(lb)*W @ bracket(ix, iy, state)/math.sqrt(nx*ny))
+        if ridge:
+            parts.extend([math.sqrt(ridge)*W @ (ix-sx)/nx,
+                          math.sqrt(ridge)*W @ (iy-sy)/ny])
+        return np.concatenate(parts)
+    fit = least_squares(residual, np.zeros(len(ids)*(1 if canonical else 2)),
+                        max_nfev=int(state.get('method_options', {}).get('STRUCTURED_MAX_NFEV', 200)))
+    ix, iy = unpack(fit.x)
+    return ix, iy, dict(method='canonical_graded' if canonical else 'graded_coupled',
+                       fitting_strategy='full_residual_nontriangular',
+                       solver_success=bool(fit.success), solver_message=str(fit.message),
+                       nfev=int(fit.nfev), bracket_exact_by_construction=canonical,
+                       **pair_diagnostics(transfer, ix, iy, sx, sy, state))
