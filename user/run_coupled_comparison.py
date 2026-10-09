@@ -15,7 +15,7 @@ import numpy as np
 import fanqo as fq
 
 
-CONFIG = "general_config.py"
+CONFIG = str(Path(__file__).resolve().with_name("general_config.py"))
 METHODS = (
     "eigen",
     "a_box_coupled_fixed",
@@ -39,7 +39,6 @@ def _serializable(value):
 
 def main():
     fq.load(CONFIG, force=True)
-    config = fq.STATE.config if hasattr(fq, "STATE") else None
     # Public API handles default output paths for maps and comparisons.
     output = Path(__file__).resolve().parent / "coupled_comparison_output"
     output.mkdir(parents=True, exist_ok=True)
@@ -51,6 +50,9 @@ def main():
         results[method] = result
         details = result["details"]
         print(f"  construction diagnostics: {details}", flush=True)
+        if details.get("solver_success") is False:
+            print("  WARNING: coupled solve did not converge: "
+                  + str(details.get("solver_message")), flush=True)
         if "Iy" in result:
             np.save(output / f"{method}_Iy.npy", result["Iy"])
         np.save(output / f"{method}_Ix.npy", result["Ix"])
