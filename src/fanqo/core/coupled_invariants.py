@@ -160,6 +160,7 @@ def construct(transfer, tnn, tnq, data, state, tol):
         "quadratic_fixed": fixed,
         "quadratic_mixing_x": cx,
         "quadratic_mixing_y": cy,
+        "quadratic_mixing_determinant": float(1.0 - cx * cy),
         "homological_x": float(np.sqrt(max(rx @ Gnn @ rx, 0.))),
         "homological_y": float(np.sqrt(max(ry @ Gnn @ ry, 0.))),
         "poisson_bracket": float(np.sqrt(max(b @ G @ b, 0.))),
