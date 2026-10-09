@@ -1,0 +1,30 @@
+name: Coupled m8 timing
+on:
+  push:
+    paths: [.github/workflows/coupled-m8-timing.yml]
+  workflow_dispatch:
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - name: Benchmark constructions
+        working-directory: user
+        run: |
+          python -u - <<'PY'
+          import time
+          import fanqo as fq
+          t=time.perf_counter()
+          fq.load("general_config.py",force=True)
+          print("LOAD_SECONDS",time.perf_counter()-t,flush=True)
+          for name in ("eigen","a_box_coupled_fixed","a_box_coupled_regularized"):
+              t=time.perf_counter()
+              print("START",name,flush=True)
+              r=fq.construct(name,force=True)
+              print("DONE",name,"SECONDS",round(time.perf_counter()-t,3),"STATUS",r["details"].get("solver_success"),"NFEV",r["details"].get("nfev"),flush=True)
+          PY
