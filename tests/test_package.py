@@ -26,6 +26,8 @@ def test_public_api_is_invariant_only():
         assert callable(getattr(fanqo, name))
 
     assert fanqo.available_methods() == (
+        "a_box_coupled_regularized",
+        "a_box_coupled_fixed",
         "a_box",
         "hybrid",
         "eigen",
