@@ -445,6 +445,7 @@ def nonlinear_transfer(
 DEFAULT_METHOD_OPTIONS = {
     "a_box": {"C": "a_box", "G": "box"},
     "a_box_coupled_regularized": {"C": "a_box", "G": "box"},
+    "a_box_coupled_fixed": {"C": "a_box", "G": "box", "COUPLED_FIX_QUADRATIC": True},
     "a_box_y0": {"C": "a_box", "G": "box", "horizontal_only": True},
     "hybrid": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
     "eigen": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
@@ -1059,6 +1060,7 @@ def construct_coupled(transfer, tnn, tnq, data, state, tol):
 
 CONSTRUCTORS = {
     "a_box_coupled_regularized": construct_coupled,
+    "a_box_coupled_fixed": construct_coupled,
     "a_box": construct_a_box,
     "hybrid": construct_hybrid,
     "eigen": construct_eigen,
