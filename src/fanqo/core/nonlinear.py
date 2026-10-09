@@ -444,6 +444,7 @@ def nonlinear_transfer(
 
 DEFAULT_METHOD_OPTIONS = {
     "a_box": {"C": "a_box", "G": "box"},
+    "a_box_coupled_regularized": {"C": "a_box", "G": "box"},
     "a_box_y0": {"C": "a_box", "G": "box", "horizontal_only": True},
     "hybrid": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
     "eigen": {"C": [1, 1, 1, 1, 1], "G": "coefficient"},
@@ -1050,7 +1051,14 @@ def construct_abel(transfer, tnn, tnq, data, state, tol):
     )
 
 
+def construct_coupled(transfer, tnn, tnq, data, state, tol):
+    """Coupled Ix/Iy solve; Iy is available from the returned details."""
+    from .coupled_invariants import construct
+    return construct(transfer, tnn, tnq, data, state, tol)
+
+
 CONSTRUCTORS = {
+    "a_box_coupled_regularized": construct_coupled,
     "a_box": construct_a_box,
     "hybrid": construct_hybrid,
     "eigen": construct_eigen,
