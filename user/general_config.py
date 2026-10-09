@@ -61,14 +61,14 @@ INVARIANT_OPTIONS = {
         "COUPLED_BRACKET_WEIGHT": 1.0,
         "COUPLED_QUADRATIC_WEIGHT": 10.0,
         "COUPLED_NONLINEAR_WEIGHT": 1e-3,
-        "COUPLED_MAX_NFEV": 40,
+        "COUPLED_MAX_ITER": 200,
     },
     "a_box_coupled_regularized": {
         "C": "a_box", "G": "box",
         "COUPLED_BRACKET_WEIGHT": 1.0,
         "COUPLED_QUADRATIC_WEIGHT": 10.0,
         "COUPLED_NONLINEAR_WEIGHT": 1e-3,
-        "COUPLED_MAX_NFEV": 40,
+        "COUPLED_MAX_ITER": 200,
     },
     "a_box": {
         "C": "a_box",
