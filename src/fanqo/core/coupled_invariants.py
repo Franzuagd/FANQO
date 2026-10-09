@@ -84,7 +84,9 @@ def construct(transfer, tnn, tnq, data, state, tol):
     # delta Sy = cy Sx. Their leading actions retain unit normalization.
     ix0, _ = nl.least_squares_ix(tnn, tnq, sx, state, tol=tol)
     iy0, _ = nl.least_squares_ix(tnn, tnq, sy, state, tol=tol)
-    initial = np.r_[ix0[q:], iy0[q:], 0., 0.]
+    fixed_quadratic = bool(options.get("COUPLED_FIX_QUADRATIC", False))
+    initial = (np.r_[ix0[q:], iy0[q:]] if fixed_quadratic
+               else np.r_[ix0[q:], iy0[q:], 0., 0.])
     triples = _bracket_indices(state)
     k, i, j, v = triples
 
@@ -93,7 +95,7 @@ def construct(transfer, tnn, tnq, data, state, tol):
 
     def unpack(z):
         hx, hy = z[:n], z[n:2*n]
-        cx, cy = z[-2:]
+        cx, cy = (0., 0.) if fixed_quadratic else z[-2:]
         qx = sx + cx * sy
         qy = sy + cy * sx
         return hx, hy, cx, cy, np.r_[qx, hx], np.r_[qy, hy]
@@ -125,6 +127,7 @@ def construct(transfer, tnn, tnq, data, state, tol):
     b = bracket(ix, iy)
     details = {
         "Iy": iy,
+        "quadratic_fixed": fixed_quadratic,
         "quadratic_mixing_x": float(cx),
         "quadratic_mixing_y": float(cy),
         "homological_x": float(np.linalg.norm(wn @ rx)),
