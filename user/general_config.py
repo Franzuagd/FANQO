@@ -55,6 +55,14 @@ LEAST_SQUARES_TOL = 1.0e-16
 A_BOX = np.array([0.01, 10e-3, 8e-3, 1e-3, 0.8e-3], dtype=float)
 
 INVARIANT_OPTIONS = {
+    "a_box_coupled_fixed": {
+        "C": "a_box", "G": "box",
+        "COUPLED_FIX_QUADRATIC": True,
+        "COUPLED_BRACKET_WEIGHT": 1.0,
+        "COUPLED_QUADRATIC_WEIGHT": 10.0,
+        "COUPLED_NONLINEAR_WEIGHT": 1e-3,
+        "COUPLED_MAX_NFEV": 40,
+    },
     "a_box_coupled_regularized": {
         "C": "a_box", "G": "box",
         "COUPLED_BRACKET_WEIGHT": 1.0,
