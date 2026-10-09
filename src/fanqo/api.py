@@ -173,6 +173,8 @@ def construct(method="a_box", *, force=False):
         "details": dict(details),
         "transfer": np.asarray(transfer, dtype=float),
     }
+    if "Iy" in details:
+        result["Iy"] = np.asarray(details.pop("Iy"), dtype=float)
     STATE.invariants[method] = result
     return result
 
