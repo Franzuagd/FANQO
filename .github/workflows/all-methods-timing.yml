@@ -1,0 +1,40 @@
+name: All invariant methods timing
+on:
+  push:
+    paths: [.github/workflows/all-methods-timing.yml]
+  workflow_dispatch:
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - name: Benchmark all methods m8
+        working-directory: user
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: |
+          python -u - <<'PY'
+          import time, json, traceback
+          import fanqo as fq
+          t=time.perf_counter()
+          fq.load("general_config.py",force=True)
+          print("LOAD_SECONDS",round(time.perf_counter()-t,3),flush=True)
+          names=fq.available_methods()
+          print("METHODS",names,flush=True)
+          for name in names:
+              t=time.perf_counter()
+              print("START",name,flush=True)
+              try:
+                  result=fq.construct(name,force=True)
+                  details=result["details"]
+                  print("DONE",name,"SECONDS",round(time.perf_counter()-t,3),"SUCCESS",details.get("solver_success"),"NFEV",details.get("nfev"),flush=True)
+              except Exception as exc:
+                  print("FAILED",name,"SECONDS",round(time.perf_counter()-t,3),"ERROR",repr(exc),flush=True)
+                  traceback.print_exc()
+          PY
