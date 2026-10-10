@@ -1,0 +1,145 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,hyperref}
+\newtheorem{proposition}{Proposition}
+\newcommand{\R}{\mathbb R}
+\title{Polynomial quasi-invariants: comparison with the eigen construction}
+\author{FANQO numerical research note}
+\date{October 2026}
+\begin{document}\maketitle
+\section{The question being tested}
+We seek a nontrivial polynomial $I_x$ whose variation along the physical tracking map is smaller than that of the current eigen construction. A small projected homological residual is a useful diagnostic, but is not our definition of success. All methods must be evaluated on the same trajectories, with a common normalization and an explicit accounting of lost particles. Initial exploratory experiments used the branch reference lattice. The final comparisons use the supplied OPA lattice, copied verbatim into the research directory.
+
+\section{Why eigen and least squares need not agree}
+Write $c=(q,h)$ and $R=T-\mathrm{Id}$, where $T$ acts on polynomial coefficients. The current eigen routine selects a near-null eigenvector and normalizes the horizontal quadratic form by
+\[
+ c_{x^2}c_{p_x^2}-\frac14c_{xp_x}^2=1.
+\]
+It does not prescribe the entire quadratic vector to equal the Courant--Snyder seed. It further selects candidates using the $xp_x$ component of the residual. Thus it is not the global minimizer of physical tracking drift, nor of an arbitrary weighted residual norm.
+
+\begin{proposition}
+Let $G$ be positive definite and $c_e=(q_e,h_e)$ be the eigen result. If
+\[
+ h_*\in\operatorname*{argmin}_h\|R(q_e,h)\|_G^2,
+\]
+then $\|R(q_e,h_*)\|_G\leq\|Rc_e\|_G$.
+\end{proposition}
+\begin{proof}
+The vector $h_e$ is feasible in the minimization. Evaluating the objective at that feasible vector proves the assertion.
+\end{proof}
+This elementary observation rules out an intrinsic superiority of eigendecomposition for the same unregularized residual and the same affine constraints. It does not apply when the quadratic seed differs, when only a subset of residual rows is included, or when a different regularized objective is compared. Numerical rank thresholds also matter in an ill-conditioned problem. Even under identical constraints, a different minimizer can have worse physical invariance.
+
+\section{Projected invariance versus physical invariance}
+Let $F$ denote the physical one-turn map and $U f=f\circ F$. Let $\mathcal T$ be the finite polynomial operator represented by $T$. For any candidate $I$,
+\[
+ (U-\mathrm{Id})I=(\mathcal T-\mathrm{Id})I+(U-\mathcal T)I.
+\]
+The second term includes truncation error and any mismatch between the polynomial model and the tracking model. It is not controlled merely by minimizing the first term. Also,
+\[
+ I(F^Nz)-I(z)=\sum_{k=0}^{N-1}[(U-\mathrm{Id})I](F^kz).
+\]
+Consequently a uniform one-step defect bound $\epsilon$ on the entire orbit implies a drift bound $N\epsilon$. A small coefficient residual alone supplies no such uniform physical bound without additional domain and model-error estimates.
+
+Likewise, $\{I_x,I_y\}=0$ is a statement of involution, not preservation by $F$. A commuting pair can have poor tracking invariance. This explains why enforcing a zero projected bracket need not improve the quantity being measured.
+
+\section{A correction fitted to physical trajectories}
+Retain the complete quadratic, linear and constant sector of $I_e$. Retain its pure-$\delta$ coefficients as well. Let $B$ inject the remaining free coefficients, and set
+\[
+ c(u)=c_e+Bu.
+\]
+For training trajectories $z_{a,k}$ define $s_a=S_x(z_{a,0})>0$ and
+\[
+ D_{(a,k),j}=\frac{\phi_j(z_{a,k})-\phi_j(z_{a,0})}{s_a}.
+\]
+The fitted correction solves
+\[
+ \min_u\ J_\lambda(u)
+ =\frac1M\|Dc_e+DBu\|_2^2+\lambda\|Su\|_2^2,
+ \qquad \lambda>0,
+\]
+where $S$ is a positive diagonal empirical feature scaling. Thus the problem is a strictly convex quadratic and has a unique solution. Its normal equation is
+\[
+ [(DB)^TDB/M+\lambda S^TS]u=-(DB)^TDc_e/M.
+\]
+The implementation rescales columns before solving. Near-singular cases require care with conditioning; the ridge is not an assertion that a monomial basis is inherently well conditioned.
+
+\begin{proposition}
+The exact fitted solution satisfies $\|Dc(u_*)\|_2\leq\|Dc_e\|_2$. For any $0\leq\alpha\leq1$, the blended correction $c_e+\alpha Bu_*$ also has training squared drift no larger than that of $c_e$.
+\end{proposition}
+\begin{proof}
+The zero correction is feasible and its penalty vanishes. Hence
+$\|Dc(u_*)\|_2^2/M\leq J_\lambda(u_*)\leq J_\lambda(0)=\|Dc_e\|_2^2/M$.
+The squared drift is convex in $u$; applying convexity on the segment from zero to $u_*$ proves the second assertion.
+\end{proof}
+This is a training statement only. It does not prove improvement of maximum drift, of unseen trajectories, or of arbitrarily long tracking.
+
+\section{Preventing a misleading improvement}
+The zero polynomial is excluded by fixing the eigen quadratic sector. This alone does not prevent a higher-order polynomial from becoming nearly flat on an annulus. We therefore measure the RMS change in initial observable values, normalized by the same $s_a$, on validation trajectories. Corrections are blended toward eigen so this change is at most $0.249$, and accepted only if their validation 90th-percentile maximum drift improves upon eigen. Eigen itself remains an eligible candidate. This is a useful finite-sample restriction, not a proof of positivity or action monotonicity throughout phase space.
+
+Training, validation and test sets contain distinct initial conditions, including random phases in both transverse planes and nonzero momenta. The fit uses 64 turns, selection uses 128 turns, and the default test uses 256 turns. Initial reference experiments used $0,\pm0.01$; the final OPA tests use $0,\pm0.01,\pm0.02,\pm0.03$ and independent 512-turn confirmation. Test data are generated after selection is frozen. Results are conditional on survival, with losses explicitly counted.
+
+The primary error is
+\[
+ E_a(I)=\frac{\max_{0\leq k\leq N}|I(z_{a,k})-I(z_{a,0})|}{S_x(z_{a,0})}.
+\]
+The original per-turn relative metric is also retained. We report medians, 90th percentiles, worst cases, per-offset errors, paired wins and a paired bootstrap interval. Timing includes the expensive training data and feature preparation separately from the final linear solve.
+
+\section{Relation to existing work}
+Finite dictionaries and snapshot pairs are standard ingredients of data-driven Koopman approximation \cite{edmd}. Eigenfunction-level accuracy must be assessed beyond the fitted spectrum \cite{accuracy}. Learning conservation laws from trajectory data is also an established research direction \cite{poincare}. Our correction uses those general ideas in a constrained polynomial regression around FANQO's eigen result; novelty is not claimed.
+
+\section{Selecting a representative inside the invariant subspace}
+The more successful alternative retains eigen as a starting point but fits only within its approximate invariant family. Let $V$ contain real directions from eigenvectors satisfying $|\lambda(T-\mathrm{Id})|\leq10^{-8}$, including directions with zero quadratic sector. Such directions cannot be normalized individually by the original quadratic-determinant rule, but they describe precisely the higher-order freedom that can change a quasi-invariant's quality.
+
+Let $P$ extract the coefficients to be kept fixed. If $Z$ spans $\ker(PV)$, then $B=VZ$ obeys $PB=0$. We solve
+\[
+ \min_u\ \frac1M\|D(c_e+Bu)\|_2^2
+       +\frac\lambda n\|E Bu\|_2^2,
+\]
+where $E$ evaluates initial values in the same action normalization. This problem is solved by SVD of the augmented design. It is convex; uniqueness requires the augmented design to have full column rank. The numerical implementation selects a minimum-norm solution if necessary. The zero correction remains feasible, so the training-error comparison above still holds.
+
+In the first version, $P$ fixes the full quadratic block and pure momentum-offset terms. In a protected chromatic version, $P$ fixes every coefficient at $\delta^0$, as well as pure-$\delta$ terms. Therefore
+\[
+ I_{\rm protected}(z,0)=I_e(z,0)
+\]
+identically in the retained polynomial, rather than merely on sampled points. This protects the on-momentum result while optimizing off-momentum behavior.
+
+The algebraic residual satisfies
+\[
+ \|R(c_e+Bu)\|\leq\|Rc_e\|+\|RB\|\,\|u\|.
+\]
+A near-unit spectral threshold alone does not guarantee a small physical residual after large coefficient combinations. We therefore validate the observable on physical trajectories. This is a construction by constrained least squares within an approximate invariant subspace, not a claim that a single eigenvector can be beaten by another solver for the identical objective.
+
+\section{Audit: an exact thin-kick counterexample}
+At $y=0$ an octupole kick has $p_x\mapsto p_x-Ox^3$. For inverse coefficient transport,
+\[
+ p_x^2\mapsto(p_x+Ox^3)^2=p_x^2+2Op_xx^3+O^2x^6.
+\]
+The previous implementation $T=\mathrm{Id}+ML$ omitted $O^2x^6$ at $m\geq6$. The generator raises transverse degree by two, so the correct exponential is a finite sum in the truncated basis. This defect was fixed and tested against direct polynomial substitution. The baseline and corrected maps are compared separately; their results must not be merged.
+
+Rectangular truncation has an additional limitation. The Hamiltonian $\delta x$ lowers transverse degree under a bracket. Thus a term discarded at transverse degree $m+1$ can contribute to a retained $\delta$-dependent degree-$m$ term later. A padded workspace or a compatible total-degree truncation is needed for a consistent formal jet; changing a solver does not repair this modeling issue. This limitation is documented rather than silently treated as solved.
+
+\section{Numerical results}
+The machine-readable reports accompanying this note contain the complete settings and results. The first $m=4$ exploratory run rejected all unblended corrections because they altered initial values excessively. This negative result motivated the bounded blending rule. Confirmation runs use a new random seed. Their numerical conclusions are provided in the accompanying results summary; no universal superiority claim follows from a single lattice.
+
+\section{Measured confirmation results on the supplied OPA lattice}
+The protected chromatic fit was tested on 336 fresh launches across seven momentum offsets for 512 turns; 248 survived. Its entire on-momentum polynomial equals the reference eigen polynomial. The fitted coefficients are frozen before generating the test set.
+\begin{center}\begin{tabular}{lrr}\toprule
+Quantity & Eigen & Protected fit\\\midrule
+Median common-scale maximum drift & 34.3515 & 16.6976\\
+90th percentile & 923.349 & 293.151\\
+Median original relative rate & 0.187981 & 0.159296\\
+Median geometric proxy & 0.178183 & 0.178488\\
+90th-percentile geometric proxy & 0.636771 & 0.596613\\\bottomrule
+\end{tabular}\end{center}
+The median paired common-scale error ratio is 0.5664, with bootstrap 95\% interval $[0.5079,0.6130]$; 77.8\% of surviving trajectories improve in that metric. Ties at zero momentum offset are included. The geometric proxy uses the initial full transverse gradient in CS coordinates. Its median does not improve, so these results do not establish better invariant geometry or dynamic aperture.
+
+The unconstrained-on-momentum subspace fit improves median common-scale drift from 46.9831 to 1.25175 on a separate fresh test, and the original relative-rate median from 0.172946 to 0.0838134. However, it worsens the zero-offset median and the 90th-percentile geometric proxy. It is therefore an explicit tradeoff, not a universal improvement.
+
+All baseline methods, failed alternatives, surviving-particle counts, per-offset results and the coarse zero-momentum grid are supplied in the machine-readable reports and \texttt{RESULTS.md}. The baseline coupled solvers reached their iteration limit at $m=8$; their finite iterates must not be called converged optima. The corrected thin-kick model and old model are tabulated separately.
+
+\begin{thebibliography}{9}
+\bibitem{edmd} M. O. Williams, I. G. Kevrekidis and C. W. Rowley, A Data-Driven Approximation of the Koopman Operator: Extending Dynamic Mode Decomposition, J. Nonlinear Sci. 25 (2015), 1307--1346. \url{https://arxiv.org/abs/1408.4408}.
+\bibitem{accuracy} H. Zhang et al., Evaluating the accuracy of the dynamic mode decomposition, J. Comput. Dyn. 7 (2020), 35--56. \url{https://doi.org/10.3934/jcd.2020002}.
+\bibitem{poincare} Z. Liu and M. Tegmark, Machine Learning Conservation Laws from Trajectories, Phys. Rev. Lett. 126 (2021), 180604. \url{https://doi.org/10.1103/PhysRevLett.126.180604}.
+\end{thebibliography}
+\end{document}

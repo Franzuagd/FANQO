@@ -1,0 +1,27 @@
+{
+  "eigen": {
+    "median_geometric_defect": 0.1929978468887591,
+    "p90_geometric_defect": 0.5777883383915179,
+    "gradient_norm_quantiles": [
+      0.003878308066044581,
+      0.10626487291073229,
+      0.2852195670081268
+    ]
+  },
+  "selected": {
+    "median_geometric_defect": 0.13937843522226928,
+    "p90_geometric_defect": 1.7724921450433682,
+    "gradient_norm_quantiles": [
+      0.0013351693905991671,
+      0.0029574128657636894,
+      0.006275477648499004
+    ]
+  },
+  "selected_to_eigen_gradient_ratio_quantiles": [
+    0.012966508668659681,
+    0.03044192443896252,
+    0.814979242703436
+  ],
+  "geometric_win_fraction": 0.5433070866141733,
+  "scope": "First-order normal-displacement proxy using initial full transverse gradient in CS coordinates; not an exact finite-displacement distance."
+}

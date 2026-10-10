@@ -1,0 +1,118 @@
+{
+  "reference": {
+    "index": 0,
+    "median": 57.42418786466804,
+    "p90": 1116.6250635796464,
+    "legacy_median": 0.1918817950510675,
+    "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+    "kind": "reference",
+    "eigenvalue": null
+  },
+  "selected": {
+    "index": 7,
+    "median": 22.488840067519586,
+    "p90": 446.0374787823383,
+    "legacy_median": 0.13816208193352192,
+    "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+    "kind": "spectral_subspace_fit",
+    "lambda": 0.01,
+    "quadratic_max_error": 0.0
+  },
+  "all": [
+    {
+      "index": 0,
+      "median": 57.42418786466804,
+      "p90": 1116.6250635796464,
+      "legacy_median": 0.1918817950510675,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "reference",
+      "eigenvalue": null
+    },
+    {
+      "index": 1,
+      "median": 2125.5104923308277,
+      "p90": 88662.84276962928,
+      "legacy_median": 0.39933417057070725,
+      "nonhorizontal_quadratic_fraction": 1.2007979118153684,
+      "kind": "spectral_candidate",
+      "eigenvalue": 6.472594746959842e-13
+    },
+    {
+      "index": 2,
+      "median": 74.0635894125984,
+      "p90": 3269.931396704571,
+      "legacy_median": 0.48232526025885464,
+      "nonhorizontal_quadratic_fraction": 1.1610718037487118,
+      "kind": "spectral_candidate",
+      "eigenvalue": 2.589776734664029e-13
+    },
+    {
+      "index": 3,
+      "median": 1642.5266079411201,
+      "p90": 41312.00607661861,
+      "legacy_median": 0.24419702124266993,
+      "nonhorizontal_quadratic_fraction": 1.000875812423265,
+      "kind": "spectral_candidate",
+      "eigenvalue": 3.109572242508989e-14
+    },
+    {
+      "index": 4,
+      "median": 57.42418786466804,
+      "p90": 1116.6250635796464,
+      "legacy_median": 0.1918817950510675,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "spectral_candidate",
+      "eigenvalue": 3.4118426441179413e-14
+    },
+    {
+      "index": 5,
+      "median": 24.137652269496396,
+      "p90": 358.3378004670347,
+      "legacy_median": 0.31901437591788495,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "spectral_subspace_fit",
+      "lambda": 1e-06,
+      "quadratic_max_error": 0.0
+    },
+    {
+      "index": 6,
+      "median": 23.209473043295194,
+      "p90": 351.9444154915037,
+      "legacy_median": 0.27315531258513515,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "spectral_subspace_fit",
+      "lambda": 0.0001,
+      "quadratic_max_error": 0.0
+    },
+    {
+      "index": 7,
+      "median": 22.488840067519586,
+      "p90": 446.0374787823383,
+      "legacy_median": 0.13816208193352192,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "spectral_subspace_fit",
+      "lambda": 0.01,
+      "quadratic_max_error": 0.0
+    },
+    {
+      "index": 8,
+      "median": 92.03483198275805,
+      "p90": 1137.9685493199731,
+      "legacy_median": 0.22251405407711658,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "spectral_subspace_fit",
+      "lambda": 1.0,
+      "quadratic_max_error": 0.0
+    },
+    {
+      "index": 9,
+      "median": 87.25315225581505,
+      "p90": 2779.322789522374,
+      "legacy_median": 0.2701261180201344,
+      "nonhorizontal_quadratic_fraction": 0.6181993007360175,
+      "kind": "spectral_subspace_fit",
+      "lambda": 100.0,
+      "quadratic_max_error": 0.0
+    }
+  ]
+}

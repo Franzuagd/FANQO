@@ -559,7 +559,7 @@ def element_transfer(
 
     For a zero-length octupole, O is already the integrated strength.  The
     integrated transport generator uses the same state-dependent sign and the kick is
-    applied directly as T = I + ML.  No fictitious length enters the map.
+    applied through the complete finite exponential. No fictitious length enters the map.
 
     Extra keyword arguments are ignored only for compatibility with older
     runners; they do not affect the physics.
@@ -581,7 +581,15 @@ def element_transfer(
             # or invent a thin-element length.
             transport_sign = float(state.get("transport_sign", -1.0))
             ML = transport_sign * O * state["M_octupole_unit"]
-            tmatrix = identity + ML
+            # A cubic momentum kick is exact at coordinate level, but its
+            # action on polynomial observables contains higher powers (e.g.
+            # px**2 produces O**2*x**6). The generator raises transverse
+            # degree by two, so the exponential terminates in this jet.
+            tmatrix = identity.copy()
+            term = identity
+            for k in range(1, state["m"] // 2 + 1):
+                term = term @ ML / k
+                tmatrix += term
         else:
             tmatrix = identity
     else:

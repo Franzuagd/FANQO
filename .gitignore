@@ -13,3 +13,11 @@ nonlinear_plots/
 /general_config.py
 /lattice_config.py
 /run.py
+
+
+# Reproducible research caches and LaTeX intermediates
+research/**/trajectories.npz
+research/**/*.log
+research/*.aux
+research/*.out
+research/**/test_trajectories.npz

@@ -82,7 +82,12 @@ def load_python_file(file_name, *, relative_to=None, module_prefix="user_config"
     sys.modules[module_name] = module
 
     try:
-        spec.loader.exec_module(module)
+        if reload:
+            # Timestamp/size-based bytecode caches can reuse stale code when a
+            # runtime config is rewritten twice within one second.
+            exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
+        else:
+            spec.loader.exec_module(module)
     except Exception:
         sys.modules.pop(module_name, None)
         raise

@@ -1,0 +1,344 @@
+{
+  "settings": {
+    "source": "fanqo_compare/research/opa_m8",
+    "selected": "fanqo_compare/research/opa_kernel_confirmation",
+    "config": "fanqo_compare/research/opa_config.py",
+    "output": "fanqo_compare/research/opa_grid",
+    "points": 9,
+    "turns": 256,
+    "extent": 4.0
+  },
+  "launch": "on-momentum orbit plus delta; px=py=0 offsets",
+  "results": [
+    {
+      "delta": 0.0,
+      "survived": 63,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 0.020699661109098294,
+          "p90": 2.6470742307737507,
+          "legacy_median": 0.0029425952069115587
+        },
+        "LS_CS_seed": {
+          "median": 0.009385621626603917,
+          "p90": 0.13271218340329238,
+          "legacy_median": 0.002073556211873699
+        },
+        "LS_eigen_seed": {
+          "median": 0.02102144734391458,
+          "p90": 3.0138919690139225,
+          "legacy_median": 0.0033510442255553006
+        },
+        "a_box_coupled_fixed": {
+          "median": 0.44609158675567734,
+          "p90": 5.093247337115885,
+          "legacy_median": 0.08245671485552511
+        },
+        "a_box_coupled_regularized": {
+          "median": 0.4463249094515889,
+          "p90": 3.4454231277176666,
+          "legacy_median": 0.09873402787047153
+        },
+        "graded_coupled": {
+          "median": 0.009836908084348884,
+          "p90": 0.13773796627794702,
+          "legacy_median": 0.002079902488268944
+        },
+        "canonical_graded": {
+          "median": 0.01212956995315496,
+          "p90": 0.37999444086102785,
+          "legacy_median": 0.0036286991781462785
+        },
+        "kernel_fit": {
+          "median": 0.012889253369757195,
+          "p90": 2.3161727128795033,
+          "legacy_median": 0.0018616211130869779
+        }
+      }
+    },
+    {
+      "delta": -0.01,
+      "survived": 59,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 21.749225859584236,
+          "p90": 188431.52242593656,
+          "legacy_median": 0.11818828324549098
+        },
+        "LS_CS_seed": {
+          "median": 5.052899750479567,
+          "p90": 628.3398989012475,
+          "legacy_median": 0.2416559574387486
+        },
+        "LS_eigen_seed": {
+          "median": 9.530022108958502,
+          "p90": 4861.812026315689,
+          "legacy_median": 0.3308211930664586
+        },
+        "a_box_coupled_fixed": {
+          "median": 2.023077597630675,
+          "p90": 18297.82428062049,
+          "legacy_median": 0.5957276457876942
+        },
+        "a_box_coupled_regularized": {
+          "median": 2.009526680774139,
+          "p90": 18205.265518990618,
+          "legacy_median": 0.5722112302821483
+        },
+        "graded_coupled": {
+          "median": 22.20500231768741,
+          "p90": 390.86908777257867,
+          "legacy_median": 0.72157734160362
+        },
+        "canonical_graded": {
+          "median": 6.0464138906461375,
+          "p90": 414.265977156705,
+          "legacy_median": 1.027346958123624
+        },
+        "kernel_fit": {
+          "median": 0.3517737893178473,
+          "p90": 197.66574497646803,
+          "legacy_median": 0.026335096585640805
+        }
+      }
+    },
+    {
+      "delta": 0.01,
+      "survived": 67,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 26.028412771421326,
+          "p90": 255.1038967606001,
+          "legacy_median": 0.1933160267142615
+        },
+        "LS_CS_seed": {
+          "median": 2.229881442061119,
+          "p90": 30.288728729106953,
+          "legacy_median": 0.14126178102150058
+        },
+        "LS_eigen_seed": {
+          "median": 4.152183239318449,
+          "p90": 54.924705590276766,
+          "legacy_median": 0.1094110793974856
+        },
+        "a_box_coupled_fixed": {
+          "median": 2.456634127160774,
+          "p90": 117.0494636729839,
+          "legacy_median": 0.2771102695571367
+        },
+        "a_box_coupled_regularized": {
+          "median": 2.4573644682048306,
+          "p90": 113.0065011210256,
+          "legacy_median": 0.2992487097513332
+        },
+        "graded_coupled": {
+          "median": 5.579192574967919,
+          "p90": 92.46015164518111,
+          "legacy_median": 0.3461836508574027
+        },
+        "canonical_graded": {
+          "median": 4.6324939446112126,
+          "p90": 196.4599846420705,
+          "legacy_median": 0.40871683555567684
+        },
+        "kernel_fit": {
+          "median": 0.32415829271088076,
+          "p90": 3.667837546616536,
+          "legacy_median": 0.022650551109966936
+        }
+      }
+    },
+    {
+      "delta": -0.02,
+      "survived": 55,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 61.2053336673183,
+          "p90": 9254165.474424465,
+          "legacy_median": 0.21193835324570928
+        },
+        "LS_CS_seed": {
+          "median": 42.31933572590468,
+          "p90": 38057.3481100574,
+          "legacy_median": 2.697478127676485
+        },
+        "LS_eigen_seed": {
+          "median": 79.77886198014046,
+          "p90": 235431.535693269,
+          "legacy_median": 2.96438926148419
+        },
+        "a_box_coupled_fixed": {
+          "median": 7.216253736768948,
+          "p90": 381451.55692402046,
+          "legacy_median": 7.531304943291683
+        },
+        "a_box_coupled_regularized": {
+          "median": 6.993439451213953,
+          "p90": 378519.69499394763,
+          "legacy_median": 7.363884321146059
+        },
+        "graded_coupled": {
+          "median": 536.1859905395178,
+          "p90": 70764.09343568143,
+          "legacy_median": 13.734773509331648
+        },
+        "canonical_graded": {
+          "median": 53.761039057176994,
+          "p90": 14222.943575969017,
+          "legacy_median": 6.480393501477353
+        },
+        "kernel_fit": {
+          "median": 1.7791907384367027,
+          "p90": 15666.423529919646,
+          "legacy_median": 0.23584981662881668
+        }
+      }
+    },
+    {
+      "delta": 0.02,
+      "survived": 63,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 100.45263856943014,
+          "p90": 1646.059168265876,
+          "legacy_median": 0.28595765350510227
+        },
+        "LS_CS_seed": {
+          "median": 7.291086985100546,
+          "p90": 913.8555396382825,
+          "legacy_median": 0.28080420594686634
+        },
+        "LS_eigen_seed": {
+          "median": 12.573574350958943,
+          "p90": 1630.29834768647,
+          "legacy_median": 0.2788215597052155
+        },
+        "a_box_coupled_fixed": {
+          "median": 3.3261449427638623,
+          "p90": 1154.6595175625653,
+          "legacy_median": 0.6818341305248737
+        },
+        "a_box_coupled_regularized": {
+          "median": 3.300264049039115,
+          "p90": 1119.6434647838983,
+          "legacy_median": 0.6775742401968105
+        },
+        "graded_coupled": {
+          "median": 20.885373922639833,
+          "p90": 232.63824931822586,
+          "legacy_median": 0.5753357037480473
+        },
+        "canonical_graded": {
+          "median": 9.981054555862459,
+          "p90": 220.92810041189205,
+          "legacy_median": 1.0961895973062612
+        },
+        "kernel_fit": {
+          "median": 1.227945995360411,
+          "p90": 14.142020833292852,
+          "legacy_median": 0.06403261080793336
+        }
+      }
+    },
+    {
+      "delta": -0.03,
+      "survived": 63,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 630.8272907379712,
+          "p90": 6609121.649138138,
+          "legacy_median": 0.7744134597801648
+        },
+        "LS_CS_seed": {
+          "median": 852.732156257691,
+          "p90": 28193.105115643237,
+          "legacy_median": 12.853506996561464
+        },
+        "LS_eigen_seed": {
+          "median": 1616.279340262267,
+          "p90": 181600.16120606512,
+          "legacy_median": 17.687405647030946
+        },
+        "a_box_coupled_fixed": {
+          "median": 1017.1069891875953,
+          "p90": 146071.3516702792,
+          "legacy_median": 69.89377658485795
+        },
+        "a_box_coupled_regularized": {
+          "median": 947.6411169827859,
+          "p90": 145381.11725088287,
+          "legacy_median": 70.2962408186059
+        },
+        "graded_coupled": {
+          "median": 255655.90316775418,
+          "p90": 3948477.6154882503,
+          "legacy_median": 19355.16341032016
+        },
+        "canonical_graded": {
+          "median": 14442.680565148123,
+          "p90": 102910.14288448612,
+          "legacy_median": 492.26010573190695
+        },
+        "kernel_fit": {
+          "median": 32.13702832238298,
+          "p90": 10060.93792788128,
+          "legacy_median": 2.691483072950886
+        }
+      }
+    },
+    {
+      "delta": 0.03,
+      "survived": 39,
+      "launched": 81,
+      "methods": {
+        "eigen": {
+          "median": 93.70502282384416,
+          "p90": 3084497.388892438,
+          "legacy_median": 0.3365439182228831
+        },
+        "LS_CS_seed": {
+          "median": 12.942654996777549,
+          "p90": 10114.68596745781,
+          "legacy_median": 0.5272732923504068
+        },
+        "LS_eigen_seed": {
+          "median": 23.17149928496927,
+          "p90": 75737.69726446237,
+          "legacy_median": 0.553746399182326
+        },
+        "a_box_coupled_fixed": {
+          "median": 4.685635668398806,
+          "p90": 176255.6937536598,
+          "legacy_median": 0.640049980812475
+        },
+        "a_box_coupled_regularized": {
+          "median": 4.650423213227615,
+          "p90": 175288.12556438832,
+          "legacy_median": 0.6488087294272226
+        },
+        "graded_coupled": {
+          "median": 32.418680736327346,
+          "p90": 7226.687004089561,
+          "legacy_median": 1.0368405811913257
+        },
+        "canonical_graded": {
+          "median": 2.534858898177606,
+          "p90": 524.4857815036812,
+          "legacy_median": 1.9248619661169324
+        },
+        "kernel_fit": {
+          "median": 0.8583093351456298,
+          "p90": 1520.6944950067605,
+          "legacy_median": 0.1295882180118758
+        }
+      }
+    }
+  ],
+  "normalization_version": "global initial CS floor and production relative floor; pilot metrics algebraically corrected"
+}

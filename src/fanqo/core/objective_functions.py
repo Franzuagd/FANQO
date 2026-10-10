@@ -196,7 +196,9 @@ def reference_fluctuation_index(
 
         mean_value = float(np.mean(values))
         std_value = float(np.std(values))
-        skew_value = float(skew(values))
+        # A constant field has no asymmetry. scipy.stats.skew returns NaN
+        # for zero variance, which previously penalized even h=0 as invalid.
+        skew_value = 0.0 if std_value == 0.0 else float(skew(values))
         if not np.isfinite(skew_value):
             return float("inf"), {
                 "reason": "undefined fluctuation skewness",
@@ -1576,3 +1578,4 @@ tracked_ix_invariance.requires = {
     "Ix",
     "trajectories",
 }
+

@@ -1,0 +1,43 @@
+{
+  "native_linear_symplectic_error": 7.946268822299159e-15,
+  "AT_linear_matrix_relative_error": 1.0047911237713327e-07,
+  "native_beta": [
+    5.728009128125011,
+    3.4984147306369513
+  ],
+  "AT_beta": [
+    5.728008585349897,
+    3.4984145160758877
+  ],
+  "native_cell_chromaticity": [
+    -0.0,
+    5.654319433712919e-16
+  ],
+  "AT_cell_chromaticity": [
+    -0.0027297482792694914,
+    -0.0008739591457936531
+  ],
+  "AT_cell_tune": [
+    0.4470638111978856,
+    0.32020017974645426
+  ],
+  "chromatic_strengths_before": {
+    "ksf1": 26.92305698350569,
+    "ksd1": -108.60512651080242
+  },
+  "chromatic_strengths_after": {
+    "ksf1": 26.989978813037283,
+    "ksd1": -108.78588487570772
+  },
+  "cell_bend_degrees": 18.0,
+  "cell_length": 24.189447305625198,
+  "thin_octupole_px2_corrected_max_coefficient_error": 5.554883140902699e-16,
+  "thin_octupole_px2_legacy_x6_coefficient": 0.0,
+  "thin_octupole_px2_expected_x6_coefficient": 4.0,
+  "AT_octupole_kick_error": 0.0,
+  "remarks": [
+    "AT uses 40 slices for this linear cross-check. Native correction uses STEP=0.01.",
+    "A unit-square polynomial norm is not the same norm as the physical A_BOX norm.",
+    "Off-momentum closed-orbit launches in research differ from production zero-orbit offsets."
+  ]
+}
