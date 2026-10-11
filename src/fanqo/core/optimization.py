@@ -139,7 +139,7 @@ def create_context(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
-    if state.get("invariant_construction", "a_box") != "a_box":
+    if state.get("invariant_construction", "a_box") not in ("a_box", "a_box_eigen_initial"):
         state["linear_cs0"] = cs0.copy()
         # C is fixed (identity for eigen, box scaling for pair methods),
         # so coefficient derivatives do not change with the Twiss parameters.
@@ -360,14 +360,14 @@ def prepare_objective_data(
 
     method = state.get("invariant_construction", "a_box")
     need_quadratic = bool(requirements & {"Sx", "Sy"})
-    if method == "a_box":
+    if method in ("a_box", "a_box_eigen_initial"):
         need_quadratic = need_quadratic or bool(requirements & {"Ix", "Iy"})
     Sx = Sy = None
     if need_quadratic:
         Sx, Sy = nl.quadratic_invariants(context["data"], state)
-        if "Sx" in requirements or (method == "a_box" and "Ix" in requirements):
+        if "Sx" in requirements or (method in ("a_box", "a_box_eigen_initial") and "Ix" in requirements):
             result["Sx"] = Sx
-        if "Sy" in requirements or (method == "a_box" and "Iy" in requirements):
+        if "Sy" in requirements or (method in ("a_box", "a_box_eigen_initial") and "Iy" in requirements):
             result["Sy"] = Sy
 
     need_transfer = bool(requirements & {"Ix", "Iy", "transfer", "tnn", "tnq"})
@@ -389,6 +389,18 @@ def prepare_objective_data(
             if "Iy" in requirements:
                 result["Iy"] = iy
                 result["Iy_construction_details"] = diagnostics
+            return result
+        if method == "a_box_eigen_initial" and requirements & {"Ix", "Iy"}:
+            eigen_transfer = nl.nonlinear_transfer(
+                context["lattice"], state["_eigen_initial_state"], tol=tol
+            )[0]
+            for plane, seed in (("x", Sx), ("y", Sy)):
+                key = "I" + plane
+                if key in requirements:
+                    result[key], result[key + "_construction_details"] = nl.eigen_initialized_a_box(
+                        transfer, state, seed, plane=plane, tol=tol,
+                        eigen_transfer=eigen_transfer
+                    )
             return result
         if "Ix" in requirements:
             if method == "eigen":

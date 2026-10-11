@@ -797,10 +797,18 @@ def initialize_nonlinear_for_method(
 ):
     """Dispatch to one of FANQO's invariant representations."""
     method = str(invariant_construction).lower()
-    if method == "a_box":
-        return initialize_nonlinear(
+    if method in ("a_box", "a_box_eigen_initial"):
+        state = initialize_nonlinear(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
         )
+        if method == "a_box_eigen_initial" and state.get("horizontal_slice_only", False):
+            raise ValueError("Eigen-initialized A_box requires the full two-plane basis.")
+        state["invariant_construction"] = method
+        if method == "a_box_eigen_initial":
+            state["_eigen_initial_state"] = initialize_nonlinear_eigen(
+                data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
+            )
+        return state
     if method == "eigen":
         return initialize_nonlinear_eigen(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
@@ -1049,6 +1057,43 @@ def eigen_invariant(
     }
 
 
+def eigen_initialized_a_box(transfer, state, seed, *, plane="x", tol=1e-14,
+                            eigen_initial=None, eigen_transfer=None):
+    """Same A_box LS problem, retaining the eigen initial guess's null component.
+
+    Physical transport is related by diagonal similarity. The eigen selector
+    runs in physical monomials, then its tail is converted to this basis. The
+    quadratic block is reset to the prescribed CS seed, exactly as in A_box.
+    A minimum-norm residual CORRECTION is solved, not a new minimum-norm tail.
+    """
+    C = np.asarray(state["C"], dtype=float)
+    if eigen_initial is None:
+        if eigen_transfer is None:
+            raise ValueError("Pass the original eigen transfer or physical eigen coefficients.")
+        eigstate = {"idx_to_vec": state["idx_to_vec"], "vec_to_idx": state["vec_to_idx"]}
+        initial, eigen_details = eigen_invariant(eigen_transfer, eigstate, plane=plane)
+    else:
+        initial = np.asarray(eigen_initial, dtype=float)
+        eigen_details = {"source": "shared reference eigen result"}
+    initial = initial / C
+    q = state["quad_size"]
+    D = np.eye(len(transfer)-q) - transfer[q:, q:]
+    rhs = transfer[q:, :q] @ seed
+    W = np.linalg.cholesky(state["Gnn"]).T
+    h0 = initial[q:]
+    correction, _, rank, _ = np.linalg.lstsq(W @ D, W @ (rhs-D @ h0), rcond=tol)
+    h = h0 + correction
+    return np.r_[seed, h], {
+        "method": "a_box_eigen_initial", "quadratic_seed": "Courant-Snyder",
+        "weighted_residual_before": float(np.linalg.norm(W @ (D @ h0-rhs))),
+        "weighted_residual_after": float(np.linalg.norm(W @ (D @ h-rhs))),
+        "rank": int(rank), "nullity": int(len(h)-rank),
+        "initial_tail_norm": float(np.linalg.norm(h0)),
+        "correction_norm": float(np.linalg.norm(correction)),
+        "eigen_details": eigen_details,
+    }
+
+
 def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
     """Solve both least-squares invariants using the block map.
 
@@ -1061,7 +1106,6 @@ def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
     Courant-Snyder vector S fixed.
     """
     Gnn = state["Gnn"]
-    B = state["B"]
     G = state["G"]
     nonquad_size = state["nonquad_size"]
 
@@ -1092,10 +1136,10 @@ def invariant(tnn, tnq, Sx, Sy, state, tol=1e-14):
     Ix = np.concatenate((Sx, hx))
     Iy = np.concatenate((Sy, hy))
 
-    bracket_vec = np.zeros(len(Ix), dtype=float)
-    for k in range(len(Ix)):
-        if B[k].nnz:
-            bracket_vec[k] = Ix @ (B[k] @ Iy)
+    # B is built before the common Courant--Snyder normalization is
+    # attached. Use the actual stored basis C for this physical diagnostic.
+    from .structured_invariants import bracket
+    bracket_vec = bracket(Ix, Iy, state)
 
     bracket_sq = bracket_vec.T @ G @ bracket_vec
     if bracket_sq < 0.0 and abs(bracket_sq) < 1e-25:
@@ -1133,6 +1177,11 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
         return Ix, Iy, details, transfer
 
     Sx, Sy = quadratic_invariants(data, state)
+    if method == "a_box_eigen_initial":
+        eigen_transfer = nonlinear_transfer(lattice, state["_eigen_initial_state"], tol=tol, cache=cache)[0]
+        Ix, dx = eigen_initialized_a_box(transfer, state, Sx, plane="x", tol=tol, eigen_transfer=eigen_transfer)
+        Iy, dy = eigen_initialized_a_box(transfer, state, Sy, plane="y", tol=tol, eigen_transfer=eigen_transfer)
+        return Ix, Iy, {"method": method, "Ix_details": dx, "Iy_details": dy}, transfer
     if state.get("horizontal_slice_only", False):
         Gnn = state["Gnn"]
         D = np.eye(state["nonquad_size"], dtype=float) - tnn

@@ -59,8 +59,11 @@ def grade_groups(state):
     groups = {}
     for i, a in state["idx_to_vec"].items():
         groups.setdefault((int(a[0]), sum(a[1:])), []).append(i)
+    # Delta is an outer perturbation layer, not transverse polynomial degree.
+    # H terms proportional to delta can lower transverse order. Process ALL
+    # orders in layer s before layer s+1 so those forcing terms are available.
     return [(g, np.array(ids, dtype=int)) for g, ids in
-            sorted(groups.items(), key=lambda kv: (sum(kv[0]), kv[0][0]))]
+            sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1]))]
 
 
 def _weights(state):
@@ -102,8 +105,8 @@ def pair_diagnostics(transfer, ix, iy, sx, sy, state):
 def _check_structure(transfer, state):
     if state.get("horizontal_slice_only", False):
         raise ValueError("Structured pairs require a full two-plane basis.")
-    if state["d"] not in (0, 1):
-        raise ValueError("Structured constructors currently support d=0 or d=1.")
+    if state["d"] < 0:
+        raise ValueError("Delta order must be nonnegative.")
     if state["m"] < 3:
         raise ValueError("Structured constructors require m>=3.")
     groups = grade_groups(state)
@@ -161,6 +164,7 @@ def construct_graded(transfer, data, state, tol=1e-14):
         blocks.append({"grade": [dd, td], "unknowns": 2*n,
                        "rank": rank, "weighted_residual": error})
     return ix, iy, {"method": "graded_coupled", "blocks": blocks,
+                    "fitting_strategy": "delta_layers_then_transverse_degree",
                     "triangular_leakage": leakage, "ridge": ridge,
                     "bracket_weight": lb, "bracket_exact_by_construction": False,
                     **pair_diagnostics(transfer, ix, iy, sx, sy, state)}
@@ -229,6 +233,7 @@ def construct_canonical(transfer, data, state, tol=1e-14):
         blocks.append({"grade": [dd, td], "unknowns": len(rows),
                        "rank": rank, "weighted_residual": error})
     return ix, iy, {"method": "canonical_graded", "blocks": blocks,
+                    "fitting_strategy": "delta_layers_then_transverse_degree",
                     "triangular_leakage": leakage, "ridge": ridge,
                     "bracket_exact_by_construction": True,
                     "dispersion_linear_terms_included": False,

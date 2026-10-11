@@ -71,6 +71,8 @@ N_PLANES = 2
 # "a_box" -> fix the Courant-Snyder quadratic block and solve the nonlinear
 #            continuation by weighted least squares.
 # "eigen" -> diagonalize T-I and select/normalize a near-fixed eigenvector.
+# "a_box_eigen_initial" -> same A_box LS constraints, solving a correction
+#                           from the reference eigen tail rather than from zero.
 INVARIANT_CONSTRUCTION = "a_box"
 # Additional options: a_box_coupled_fixed, a_box_coupled_regularized,
 # graded_coupled, canonical_graded. Pair methods construct auxiliary Iy even

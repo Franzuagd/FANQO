@@ -105,7 +105,10 @@ def test_nontriangular_full_residual_path(problem, method):
     state=dict(state,invariant_construction=method,
                method_options={'STRUCTURED_RIDGE':1e-8,'STRUCTURED_MAX_NFEV':4})
     T=T.copy()
-    T[state['vec_to_idx'][(1,1,0,0,0)],state['vec_to_idx'][(0,3,0,0,0)]] += .02
+    # A degree-lowering entry INSIDE one delta layer really breaks the
+    # layered triangular condition. Lowering order from an earlier delta
+    # layer is allowed and must not trigger the global fallback.
+    T[state['vec_to_idx'][(0,1,0,0,0)],state['vec_to_idx'][(0,3,0,0,0)]] += .02
     ix,iy,details=si.construct_pair(T,data,state)
     assert details['fitting_strategy']=='full_residual_nontriangular'
     assert np.isfinite(ix).all() and np.isfinite(iy).all()

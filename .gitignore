@@ -21,3 +21,6 @@ research/**/*.log
 research/*.aux
 research/*.out
 research/**/test_trajectories.npz
+
+# Local Ix_comb comparisons
+Ix_comb_results/
