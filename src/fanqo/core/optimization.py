@@ -139,6 +139,10 @@ def create_context(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
+    if state.get('invariant_construction') == 'action_a_box':
+        from .action_a_box import attach_metric
+        attach_metric(state, state['action_box'], cs0)
+        return
     if state.get("invariant_construction", "a_box") not in ("a_box", "a_box_eigen_initial"):
         state["linear_cs0"] = cs0.copy()
         # C is fixed (identity for eigen, box scaling for pair methods),
@@ -360,7 +364,7 @@ def prepare_objective_data(
 
     method = state.get("invariant_construction", "a_box")
     need_quadratic = bool(requirements & {"Sx", "Sy"})
-    if method in ("a_box", "a_box_eigen_initial"):
+    if method in ("a_box", "a_box_eigen_initial", "action_a_box"):
         need_quadratic = need_quadratic or bool(requirements & {"Ix", "Iy"})
     Sx = Sy = None
     if need_quadratic:
@@ -380,6 +384,14 @@ def prepare_objective_data(
         if "tnq" in requirements:
             result["tnq"] = tnq
         method = state.get("invariant_construction", "a_box")
+        if method == 'action_a_box' and requirements & {'Ix', 'Iy'}:
+            from .action_a_box import solve
+            for plane, seed in [('x', Sx), ('y', Sy)]:
+                key = 'I' + plane
+                if key in requirements:
+                    result[key], result[key + '_construction_details'] = solve(
+                        transfer, seed, state, tol)
+            return result
         from .structured_invariants import PAIR_METHODS, construct_pair
         if method in PAIR_METHODS and requirements & {"Ix", "Iy"}:
             ix, iy, diagnostics = construct_pair(transfer, context["data"], state, tol)
@@ -467,7 +479,8 @@ def _snapshot_mutable_context(context):
     state = context["state"]
     state_values = {
         key: _copy_value(state[key])
-        for key in ("C", "linear_cs0", "D_x", "D_y", "D_px", "D_py")
+        for key in ("C", "linear_cs0", "D_x", "D_y", "D_px", "D_py",
+                    "G", "Gqq", "Gnn", "action_weight", "action_box")
         if key in state
     }
     return {

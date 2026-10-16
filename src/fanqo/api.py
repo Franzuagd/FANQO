@@ -172,9 +172,11 @@ def _build_context(parameters):
         field_symbols=cfg.FIELD_SYMBOLS,
         n_planes=cfg.N_PLANES,
         invariant_construction=cfg.INVARIANT_CONSTRUCTION,
-        method_options=getattr(cfg, "INVARIANT_OPTIONS", {}).get(
-            str(cfg.INVARIANT_CONSTRUCTION).lower(), {}
-        ),
+        method_options={
+            **({'ACTION_BOX': cfg.ACTION_BOX} if hasattr(cfg, 'ACTION_BOX') else {}),
+            **getattr(cfg, "INVARIANT_OPTIONS", {}).get(
+                str(cfg.INVARIANT_CONSTRUCTION).lower(), {}),
+        },
     )
 
 

@@ -71,12 +71,15 @@ N_PLANES = 2
 # "a_box" -> fix the Courant-Snyder quadratic block and solve the nonlinear
 #            continuation by weighted least squares.
 # "eigen" -> diagonalize T-I and select/normalize a near-fixed eigenvector.
+# "action_a_box" -> fixed CS seed, LS over the ACTION_BOX ellipses below.
+# On this branch eigen ranks the full quadratic part by distance to Sx (or Sy
+# when explicitly constructing Iy), without using the other plane's seed.
 # "a_box_eigen_initial" -> same A_box LS constraints, solving a correction
 #                           from the reference eigen tail rather than from zero.
 INVARIANT_CONSTRUCTION = "a_box"
 # Additional options: a_box_coupled_fixed, a_box_coupled_regularized,
 # graded_coupled, canonical_graded. Pair methods construct auxiliary Iy even
-# when COMPUTE_IY=False. Existing eigen/a_box behavior is unchanged.
+# when COMPUTE_IY=False. Regular a_box behavior is unchanged.
 INVARIANT_OPTIONS = {
     "a_box_coupled_fixed": {
         "COUPLED_BRACKET_WEIGHT": 1.0,
@@ -101,6 +104,14 @@ A_BOX = np.array(
     [0.01, 10e-3, 8.0e-3, 1.0e-3, 0.8e-3],
     dtype=float,
 )
+
+# Uniform Jx in [0,Jx_max], Jy in [0,Jy_max], both angles in [0,2*pi),
+# delta in [-delta_max,delta_max]. J=S uses FANQO's convention WITHOUT 1/2.
+# These are independent action bounds, not Cartesian half-widths. At the
+# reference optics they correspond approximately to x_max=10mm, y_max=8mm.
+# A_BOX remains the Cartesian domain for regular a_box; for action_a_box its
+# entries only set the internal monomial coefficient scaling.
+ACTION_BOX = {"Jx_max": 1.75e-5, "Jy_max": 1.83e-5, "delta_max": 0.01}
 
 # 8. INVARIANTS TO COMPUTE / KEEP ACTIVE
 # Computing only the invariant planes that are actually needed avoids an

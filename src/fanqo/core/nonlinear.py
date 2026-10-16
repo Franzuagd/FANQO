@@ -797,6 +797,20 @@ def initialize_nonlinear_for_method(
 ):
     """Dispatch to one of FANQO's invariant representations."""
     method = str(invariant_construction).lower()
+    if method == "action_a_box":
+        from .action_a_box import attach_metric
+        state = initialize_nonlinear(
+            data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
+        )
+        # M_basis was built in epsilon coordinates. Use exactly those scales;
+        # the action domain enters only through its physical Gram matrix.
+        state['C'] = state['epsilon'].copy()
+        state['invariant_construction'] = method
+        state['method_options'] = dict(method_options or {})
+        attach_metric(state, state['method_options'].get('ACTION_BOX'))
+        for name, axis in [('D_x', 1), ('D_y', 2), ('D_px', 3), ('D_py', 4)]:
+            state[name] = build_derivative_matrix(state, axis)
+        return state
     if method in ("a_box", "a_box_eigen_initial"):
         state = initialize_nonlinear(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
@@ -968,17 +982,14 @@ def eigen_invariant(
     plane="x",
     imag_tol=1.0e-12,
 ):
-    """Construct a near-invariant eigenvector of the one-turn transfer.
+    """Select a near-unit eigenvector by distance of its quadratic part to Sx.
 
-    The ideal invariant coefficient vector satisfies T c = c, equivalently
-    (T-I)c = 0. Numerically we diagonalize T-I, retain near-zero real positive
-    eigenvalues, normalize candidate quadratic blocks with
-
-        c_q2*c_p2 - (c_qp/2)^2 = 1,
-
-    and select the candidate with the implemented mixed-quadratic residual
-    criterion. The normalization removes the arbitrary eigenvector amplitude.
-
+    For plane='y' the target is Sy. Each call uses ONLY its requested seed.
+    Candidate vectors are normalized to positive requested-plane determinant
+    one. Rank by Euclidean distance of ALL TEN physical delta=0 quadratic
+    coefficients to that seed (other-plane and cross-plane targets are zero).
+    No mixing of eigenvectors or fitting to the other CS seed is performed.
+    Exact unit eigenvalues and small deviations of either sign are included.
     """
     transfer = np.asarray(transfer, dtype=float)
     size = len(state["idx_to_vec"])
@@ -1003,37 +1014,44 @@ def eigen_invariant(
     )
     real_mask = np.abs(np.imag(eigenvalues)) <= float(imag_tol)
     real_values = np.real(eigenvalues[real_mask])
-    positive = real_values[real_values > 0.0]
-    if positive.size == 0:
-        raise ValueError(
-            "Eigen construction found no positive real eigenvalue of T-I."
-        )
-
-    cutoff = _eigenvalue_cutoff(np.min(positive))
+    nonzero = np.abs(real_values[np.abs(real_values) > 0.0])
+    cutoff = _eigenvalue_cutoff(np.min(nonzero)) if nonzero.size else 1e-10
     candidate_indices = [
         k for k, value in enumerate(eigenvalues)
         if abs(float(np.imag(value))) <= float(imag_tol)
-        and 0.0 < float(np.real(value)) < cutoff
+        and abs(float(np.real(value))) <= cutoff
     ]
     if not candidate_indices:
         raise ValueError(
             "Eigen construction found no eigenvalue inside its adaptive window."
         )
 
+    quad = np.array([i for i,a in state['idx_to_vec'].items()
+                     if a[0] == 0 and sum(a[1:]) == 2], dtype=int)
+    target = np.zeros(size)
+    offset = 0 if plane == 'x' else 3
+    beta, alpha, gamma = np.asarray(state['linear_cs0'])[offset:offset+3]
+    target[[i_q2, i_qp, i_p2]] = [gamma, 2*alpha, beta]
+    target_norm = np.linalg.norm(target[quad])
     candidates = []
     for k in candidate_indices:
-        w = np.real(eigenvectors[:, k]).astype(float, copy=True)
-        determinant = w[i_q2] * w[i_p2] - (0.5 * w[i_qp]) ** 2
+        vector = eigenvectors[:, k]
+        pivot = int(np.argmax(np.abs(vector)))
+        vector = vector * np.exp(-1j*np.angle(vector[pivot]))
+        if np.linalg.norm(vector.imag) > 1e-8 * max(np.linalg.norm(vector.real), 1e-300):
+            continue
+        w = vector.real.astype(float, copy=True)
+        physical = w * state['C']
+        determinant = physical[i_q2] * physical[i_p2] - (0.5 * physical[i_qp]) ** 2
         if not np.isfinite(determinant) or determinant <= 0.0:
             continue
 
-        sign = float(np.sign(w[i_p2]))
+        sign = float(np.sign(physical[i_p2]))
         if sign == 0.0:
             sign = 1.0
         w *= sign / math.sqrt(determinant)
 
-        residual = transfer @ w - w
-        selection_residual = abs(float(residual[i_qp]))
+        selection_residual = np.linalg.norm((w*state['C']-target)[quad]) / target_norm
         if not np.isfinite(selection_residual):
             continue
         candidates.append((
@@ -1050,7 +1068,10 @@ def eigen_invariant(
     candidates.sort(key=lambda item: (item[0], item[1]))
     selection_residual, eigen_residual, invariant_vector = candidates[0]
     return invariant_vector, {
-        "reference_selection_residual": float(selection_residual),
+        "selection": "closest_full_quadratic_to_requested_CS_seed",
+        "target_seed": 'Sx' if plane == 'x' else 'Sy',
+        "quadratic_relative_distance": float(selection_residual),
+        "selection_metric": "Euclidean physical monomial coefficients, all delta=0 degree-2 terms",
         "eigenvalue_residual": float(eigen_residual),
         "reference_candidate_count": int(len(candidates)),
         "eigen_cutoff": float(cutoff),
@@ -1177,6 +1198,11 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
         return Ix, Iy, details, transfer
 
     Sx, Sy = quadratic_invariants(data, state)
+    if method == 'action_a_box':
+        from .action_a_box import solve
+        Ix, dx = solve(transfer, Sx, state, tol)
+        Iy, dy = solve(transfer, Sy, state, tol)
+        return Ix, Iy, {'method': method, 'Ix_details': dx, 'Iy_details': dy}, transfer
     if method == "a_box_eigen_initial":
         eigen_transfer = nonlinear_transfer(lattice, state["_eigen_initial_state"], tol=tol, cache=cache)[0]
         Ix, dx = eigen_initialized_a_box(transfer, state, Sx, plane="x", tol=tol, eigen_transfer=eigen_transfer)
