@@ -33,8 +33,16 @@ def main():
         os.environ[name]=str(args.threads)
     try:
         from fanqo.action_comparison import run_action_comparison
-    except ImportError as exc:
-        raise SystemExit('Install FANQO from branch action-a-box-0.3 with tracking support first.') from exc
+    except ModuleNotFoundError as exc:
+        # Only give the installation hint when FANQO itself is absent. An
+        # ImportError raised inside action_comparison (for example, a missing
+        # optional dependency or a stale installed package) must remain visible.
+        if exc.name in {'fanqo', 'fanqo.action_comparison'}:
+            raise SystemExit(
+                'FANQO action comparison is not installed in this Python environment. '
+                'Install branch action-a-box-0.3, then rerun this file.'
+            ) from exc
+        raise
     run_action_comparison(args.config,action_box={
         'Jx_max':args.jx_max,'Jy_max':args.jy_max,'delta_max':args.delta_max},
         output=args.output,deltas=tuple(args.deltas),order=args.order,
