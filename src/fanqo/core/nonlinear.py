@@ -797,7 +797,7 @@ def initialize_nonlinear_for_method(
 ):
     """Dispatch to one of FANQO's invariant representations."""
     method = str(invariant_construction).lower()
-    if method == "action_a_box":
+    if method in ("action_a_box", "root_geometry"):
         from .action_a_box import attach_metric
         state = initialize_nonlinear(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
@@ -1198,6 +1198,10 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
         return Ix, Iy, details, transfer
 
     Sx, Sy = quadratic_invariants(data, state)
+    if method == 'root_geometry':
+        from .root_geometry import solve
+        Ix, dx = solve(transfer, Sx, state, tol)
+        return Ix, None, {'method': method, 'Ix_details': dx}, transfer
     if method == 'action_a_box':
         from .action_a_box import solve
         Ix, dx = solve(transfer, Sx, state, tol)

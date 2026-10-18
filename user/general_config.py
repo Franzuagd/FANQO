@@ -72,6 +72,8 @@ N_PLANES = 2
 #            continuation by weighted least squares.
 # "eigen" -> diagonalize T-I and select/normalize a near-fixed eigenvector.
 # "action_a_box" -> fixed CS seed, LS over the ACTION_BOX ellipses below.
+# "root_geometry" -> action_a_box seed, then constrained horizontal root fit
+#                    at delta=0, Jy=0. Ix only; see docs/root_geometry.md.
 # On this branch eigen ranks the full quadratic part by distance to Sx (or Sy
 # when explicitly constructing Iy), without using the other plane's seed.
 # "a_box_eigen_initial" -> same A_box LS constraints, solving a correction

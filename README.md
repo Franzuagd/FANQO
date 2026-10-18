@@ -1,4 +1,13 @@
-# FANQO — a_box vs eigen optimization experiment
+# FANQO — root geometry comparison
+
+The current branch adds the root-based invariant construction and the
+delta-zero comparison runner. See [docs/root_geometry.md](docs/root_geometry.md)
+for installation, the precise constrained objective and the output files.
+Run `python user/run_root_comparison.py --quick` from an installed checkout.
+
+The earlier a_box/eigen experiment documented below remains available.
+
+## Earlier a_box vs eigen optimization experiment
 
 This branch starts from `Development-0.3` / FANQO `0.3.0.dev0` and is
 deliberately narrow.  It tests whether the invariant construction used inside

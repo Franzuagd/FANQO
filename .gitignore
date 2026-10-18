@@ -24,3 +24,7 @@ research/**/test_trajectories.npz
 
 # Local Ix_comb comparisons
 Ix_comb_results/
+
+# Generated root-comparison outputs and crash-interrupted runtime configs.
+root_comparison/
+user/_root_compare_*.py

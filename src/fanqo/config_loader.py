@@ -181,7 +181,7 @@ def validate_general_config(general_cfg):
         raise ValueError("ANALYSIS_CELLS must be a positive integer.")
     method = str(general_cfg.INVARIANT_CONSTRUCTION).lower()
     from .core.structured_invariants import PAIR_METHODS
-    if method not in {"a_box", "action_a_box", "a_box_eigen_initial", "eigen", *PAIR_METHODS}:
+    if method not in {"a_box", "action_a_box", "root_geometry", "a_box_eigen_initial", "eigen", *PAIR_METHODS}:
         raise ValueError(
             "Unknown INVARIANT_CONSTRUCTION: " + method
         )
