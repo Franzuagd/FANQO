@@ -51,7 +51,21 @@ def create_context(
     variables,
     field_symbols,
     n_planes=2,
+    invariant_construction='a_box',
+    objective='horizontal_shape',
+    action_box=None,
+    geometry_points=None,
+    geometry_options=None,
+    reference_options=None,
 ):
+    method = str(invariant_construction).lower()
+    objective = str(objective).lower()
+    if method not in ('a_box', 'action_angle_ls', 'eigen'):
+        raise ValueError('INVARIANT_CONSTRUCTION must be a_box, action_angle_ls or eigen.')
+    if objective not in ('horizontal_shape', 'action_geometry', 'reference_fluctuation_index'):
+        raise ValueError('Unknown OBJECTIVE: choose horizontal_shape, action_geometry or reference_fluctuation_index.')
+    if objective == 'action_geometry' and (method != 'action_angle_ls' or geometry_points is None):
+        raise ValueError('action_geometry needs action_angle_ls and ACTION_GEOMETRY_POINTS.')
     magnets, lattice, data, correction, p = lin.prepare_lattice(
         parameters=parameters,
         ring_names=ring_names,
@@ -77,6 +91,31 @@ def create_context(
         field_symbols=field_symbols,
         n=n_planes,
     )
+    state['invariant_construction'] = method
+    state['objective'] = objective
+    if objective == 'reference_fluctuation_index':
+        state['reference_options'] = dict(reference_options or {})
+        state['D_y'] = nl.build_derivative_matrix(state, 2)
+        state['D_py'] = nl.build_derivative_matrix(state, 4)
+    if method == 'action_angle_ls':
+        from . import action_angle_ls
+        state['C'] = state['epsilon'].copy()
+        action_angle_ls.attach(state, action_box)
+        state['D_x'] = nl.build_derivative_matrix(state, 1)
+        state['D_px'] = nl.build_derivative_matrix(state, 3)
+        if objective == 'reference_fluctuation_index':
+            state['D_y'] = nl.build_derivative_matrix(state, 2)
+            state['D_py'] = nl.build_derivative_matrix(state, 4)
+    if objective == 'action_geometry':
+        state['action_geometry_points'] = np.array(geometry_points, dtype=float, copy=True)
+        state['action_geometry_options'] = dict(geometry_options or {})
+        # Validate the grid/settings at load, using exact CS radial coefficients.
+        from .action_geometry_objective import action_geometry_objective
+        sx, _ = nl.quadratic_invariants(data, state)
+        seed = np.zeros(len(state['C'])); q = state['quad_size']
+        seed[:q] = np.linalg.solve(state['radial_transform'][:q, :q], sx)
+        action_geometry_objective(seed, state, state['action_geometry_points'],
+                                  **state['action_geometry_options'])
 
     return {
         "magnets": magnets,
@@ -107,6 +146,17 @@ def create_context(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
+    if state.get('invariant_construction') == 'action_angle_ls':
+        from . import action_angle_ls
+        state['C'] = state['epsilon'].copy()
+        action_angle_ls.attach(state, state['action_box'], cs0)
+        state['D_x'] = nl.build_derivative_matrix(state, 1)
+        state['D_px'] = nl.build_derivative_matrix(state, 3)
+        if state.get('objective') == 'reference_fluctuation_index':
+            state['D_y'] = nl.build_derivative_matrix(state, 2)
+            state['D_py'] = nl.build_derivative_matrix(state, 4)
+        state.pop('radial_last_coefficients', None)
+        return
     bx0, ax0, gx0, _, _, _ = cs0
 
     vec_to_idx = state["vec_to_idx"]
@@ -127,6 +177,9 @@ def _refresh_nonlinear_normalization(state, data):
     state["linear_cs0"] = cs0.copy()
     state["D_x"] = nl.build_derivative_matrix(state, 1)
     state["D_px"] = nl.build_derivative_matrix(state, 3)
+    if state.get('objective') == 'reference_fluctuation_index':
+        state['D_y'] = nl.build_derivative_matrix(state, 2)
+        state['D_py'] = nl.build_derivative_matrix(state, 4)
 
 
 def apply_candidate(context, v, vary):
@@ -233,7 +286,15 @@ def nonlinear_transfer(context, tol):
 def _horizontal_invariant(context, tol):
     state = context["state"]
     Sx, _ = nl.quadratic_invariants(context["data"], state)
-    _, tnn, tnq = nonlinear_transfer(context, tol)
+    transfer, tnn, tnq = nonlinear_transfer(context, tol)
+    if state.get('invariant_construction') == 'eigen':
+        from .eigen_reference import solve
+        Ix, _ = solve(transfer, state, plane='x')
+        return Ix, Sx
+    if state.get('invariant_construction') == 'action_angle_ls':
+        from .action_angle_ls import solve
+        Ix, _ = solve(transfer, Sx, state, tol)
+        return Ix, Sx
 
     Gnn = state["Gnn"]
     D = np.eye(state["nonquad_size"], dtype=float) - tnn
@@ -243,6 +304,26 @@ def _horizontal_invariant(context, tol):
     hx, *_ = np.linalg.lstsq(Lg.T @ D, Lg.T @ Ux, rcond=tol)
     Ix = np.concatenate((Sx, hx))
     return Ix, Sx
+
+
+def _f_obj(Ix, Sx, state, gradient_weight):
+    """Select the objective; the optimizer and candidate lifecycle stay unchanged."""
+    if state.get('objective') == 'reference_fluctuation_index':
+        from .reference_objective import reference_fluctuation_index
+        value, details = reference_fluctuation_index(
+            {'Ix': Ix, 'state': state}, **state['reference_options'])
+        return dict(objective=float(value), reference_fluctuation=details)
+    if state.get('objective') == 'action_geometry':
+        from .action_geometry_objective import action_geometry_objective
+        geometry = action_geometry_objective(
+            state['radial_last_coefficients'], state, state['action_geometry_points'],
+            **state['action_geometry_options'])
+        return dict(objective=geometry['loss'], quality=geometry['quality'],
+                    geometry=geometry)
+    objective, value_norm, gradient_norm = nl.horizontal_shape_objective(
+        Ix, Sx, state, gradient_weight=gradient_weight)
+    return dict(objective=float(objective), value_norm=float(value_norm),
+                gradient_norm=float(gradient_norm))
 
 
 def _copy_value(value):
@@ -258,9 +339,14 @@ def _snapshot_mutable_context(context):
         magnets.append((elem, [_copy_value(value) for value in elem]))
 
     state = context["state"]
+    state_keys = ("C", "linear_cs0", "D_x", "D_y", "D_px", "D_py")
+    if state.get('invariant_construction') == 'action_angle_ls':
+        state_keys += ("G", "Gqq", "Gnn", "action_box", "action_weight",
+                       "radial_transform", "radial_labels", "radial_gram",
+                       "radial_weight", "radial_groups", "radial_last_coefficients")
     state_values = {
         key: _copy_value(state[key])
-        for key in ("C", "linear_cs0", "D_x", "D_px")
+        for key in state_keys
         if key in state
     }
     return {
@@ -281,6 +367,8 @@ def _restore_mutable_context(context, snapshot):
     context["correction"] = _copy_value(snapshot["correction"])
     for key, value in snapshot["state"].items():
         context["state"][key] = _copy_value(value)
+    if 'radial_last_coefficients' not in snapshot['state']:
+        context['state'].pop('radial_last_coefficients', None)
     context["map_cache"].clear()
     context["map_cache"].update(snapshot["map_cache"])
 
@@ -291,12 +379,7 @@ def evaluate_candidate(context, v, vary, gradient_weight, tol, invalid_penalty):
     try:
         apply_candidate(context, v, vary)
         Ix, Sx = _horizontal_invariant(context, tol)
-        objective, value_norm, gradient_norm = nl.horizontal_shape_objective(
-            Ix,
-            Sx,
-            context["state"],
-            gradient_weight=gradient_weight,
-        )
+        objective = _f_obj(Ix, Sx, context['state'], gradient_weight)['objective']
         if not np.isfinite(objective):
             _restore_mutable_context(context, snapshot)
             return float(invalid_penalty)
@@ -311,20 +394,28 @@ def full_diagnostics(context, gradient_weight, tol):
     state = context["state"]
     Sx, Sy = nl.quadratic_invariants(context["data"], state)
     transfer, tnn, tnq = nonlinear_transfer(context, tol)
-    result = nl.invariant(tnn, tnq, Sx, Sy, state, tol=tol)
-    Ix, Iy = result[-2], result[-1]
-
-    objective, value_norm, gradient_norm = nl.horizontal_shape_objective(
-        Ix,
-        Sx,
-        state,
-        gradient_weight=gradient_weight,
-    )
+    construction_details = {}
+    if state.get('invariant_construction') == 'eigen':
+        from .eigen_reference import decompose, solve
+        eigensystem = decompose(transfer, state)
+        Ix, construction_details['Ix_construction_details'] = solve(
+            transfer, state, plane='x', eigensystem=eigensystem)
+        Iy, construction_details['Iy_construction_details'] = solve(
+            transfer, state, plane='y', eigensystem=eigensystem)
+    elif state.get('invariant_construction') == 'action_angle_ls':
+        from .action_angle_ls import solve
+        Ix, _ = solve(transfer, Sx, state, tol)
+        radial_x = state['radial_last_coefficients'].copy()
+        Iy, _ = solve(transfer, Sy, state, tol)
+        # The horizontal objective must use Ix coefficients, never the last Iy solve.
+        state['radial_last_coefficients'] = radial_x
+    else:
+        result = nl.invariant(tnn, tnq, Sx, Sy, state, tol=tol)
+        Ix, Iy = result[-2], result[-1]
 
     return {
-        "objective": float(objective),
-        "value_norm": float(value_norm),
-        "gradient_norm": float(gradient_norm),
+        **_f_obj(Ix, Sx, state, gradient_weight),
+        **construction_details,
         "Ix": Ix,
         "Iy": Iy,
     }

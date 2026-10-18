@@ -1,4 +1,5 @@
 """FANQO public API."""
+from .core.action_geometry_objective import action_geometry_objective
 from .api import (
  load,status,current_parameters,current_lattice,set_parameters,
  linear_summary,linear_checks,plot_linear,write_linear_report,

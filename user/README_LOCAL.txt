@@ -13,6 +13,26 @@ These files are intentionally separate from the FANQO GitHub repository.
 
 Your generated plots/reports stay in this local working folder.
 
+TWO OBJECTIVE COMPARISON (action-geometry-main-0.3 package)
+------------------------------------------------------
+Place run_a_box.py and run_action_geometry.py beside the same general_config.py.
+Run each independently:
+
+   python run_a_box.py
+   python run_action_geometry.py
+
+Both follow the original run.py workflow and respect your configured CMA_TIME
+and POWELL_TIME_FRACTION (quick mode is disabled). Each starts from the lattice
+selected in general_config.py. They select their method/objective in memory;
+your configuration file is not modified. Outputs go to OUTPUT_ROOT/a_box and
+OUTPUT_ROOT/action_geometry. FMA is performed if RUN_FMA_START_END=True and
+PyAT is installed; otherwise optimization and the native plots/reports still run.
+
+Third reference: run_eigen.py selects eigen + reference_fluctuation_index
+(the advisor derivative/fluctuation objective) and saves to OUTPUT_ROOT/eigen.
+It follows the same full-budget workflow. REFERENCE_OBJECTIVE_* settings in
+general_config.py control its grid; missing settings use the prior defaults.
+
 PLOT DISPLAY MODE
 -----------------
 In general_config.py:

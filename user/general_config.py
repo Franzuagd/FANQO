@@ -52,6 +52,32 @@ ORDER = 8
 DELTA_ORDER = 1
 N_PLANES = 2
 
+# Optional new method/objective. Keep these defaults for the original behavior.
+# To use geometric scoring, select action_angle_ls AND action_geometry.
+INVARIANT_CONSTRUCTION = 'a_box'  # 'a_box', 'action_angle_ls' or 'eigen'
+OBJECTIVE = 'horizontal_shape'   # Also 'action_geometry' or 'reference_fluctuation_index'
+ACTION_BOX = {'Jx_max': 4.3645e-6, 'Jy_max': 1.83e-5, 'delta_max': 0.01}
+# Explicit grid rows: (delta, Jy, phi_y in radians, Jx0), J=S (no factor 1/2).
+# Only one phi_y is needed at Jy=0. These choices give 27 points.
+ACTION_GEOMETRY_POINTS = np.array([
+    (dd, jy, fy, fraction * ACTION_BOX['Jx_max'])
+    for dd in (-0.005, 0.0, 0.005)
+    for jy, fy in ((0.0, 0.0), (0.1 * ACTION_BOX['Jy_max'], 0.0),
+                   (0.1 * ACTION_BOX['Jy_max'], np.pi/2))
+    for fraction in (0.1, 0.3, 0.5)
+])
+ACTION_GEOMETRY_OPTIONS = dict(
+    angles=64, amplitude_scale=0.5, slope_scale=1.0, derivative_weight=0.1,
+)
+
+# Advisor's reference objective, recovered from the earlier implementation.
+REFERENCE_OBJECTIVE_X_RANGE = 2.5e-3
+REFERENCE_OBJECTIVE_X_POINTS = 21
+REFERENCE_OBJECTIVE_Y_RANGE = 0.7e-3
+REFERENCE_OBJECTIVE_Y_POINTS = 11
+REFERENCE_OBJECTIVE_DELTA_VALUES = (-3.4e-2,)
+REFERENCE_OBJECTIVE_MOMENTUM_WEIGHT = 0.7
+
 # 7. NORMALIZATION / PHYSICAL BOX
 A_BOX = np.array( #     [delta, x, y, px, py]
     [0.01, 10e-3, 8.0e-3, 1.0e-3, 0.8e-3],

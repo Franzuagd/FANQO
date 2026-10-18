@@ -122,6 +122,18 @@ def _build_context(parameters):
         variables=cfg.VARIABLES,
         field_symbols=cfg.FIELD_SYMBOLS,
         n_planes=cfg.N_PLANES,
+        invariant_construction=getattr(cfg, 'INVARIANT_CONSTRUCTION', 'a_box'),
+        objective=getattr(cfg, 'OBJECTIVE', 'horizontal_shape'),
+        action_box=getattr(cfg, 'ACTION_BOX', None),
+        geometry_points=getattr(cfg, 'ACTION_GEOMETRY_POINTS', None),
+        geometry_options=getattr(cfg, 'ACTION_GEOMETRY_OPTIONS', None),
+        reference_options=dict(
+            x_range=getattr(cfg, 'REFERENCE_OBJECTIVE_X_RANGE', 2.5e-3),
+            x_points=getattr(cfg, 'REFERENCE_OBJECTIVE_X_POINTS', 21),
+            y_range=getattr(cfg, 'REFERENCE_OBJECTIVE_Y_RANGE', .7e-3),
+            y_points=getattr(cfg, 'REFERENCE_OBJECTIVE_Y_POINTS', 11),
+            delta_values=getattr(cfg, 'REFERENCE_OBJECTIVE_DELTA_VALUES', (-.034,)),
+            momentum_weight=getattr(cfg, 'REFERENCE_OBJECTIVE_MOMENTUM_WEIGHT', .7)),
     )
 
 
@@ -590,8 +602,12 @@ def write_invariant_report(file_name=None):
            f"Iy coefficients       : {len(STATE.Iy)}",
            f"Ix finite             : {bool(np.all(np.isfinite(STATE.Ix)))}",
            f"Iy finite             : {bool(np.all(np.isfinite(STATE.Iy)))}"]
-    for key in ("objective","value_norm","gradient_norm"):
+    for key in ("objective","quality","value_norm","gradient_norm"):
         if key in details: lines.append(f"{key:<22}: {details[key]}")
+    for plane in ('Ix', 'Iy'):
+        construction = details.get(plane+'_construction_details', {})
+        if construction:
+            lines += [f'{plane} {key}: {value}' for key, value in construction.items()]
     lines += ["","NONLINEAR STATE CHECKS","-"*90]
     lines += [f"{k:<30} {v}" for k,v in checks.items()]
     return _write_text(file_name,"\n".join(lines))
@@ -604,7 +620,13 @@ def _optimization_report_text(result):
     f=lambda x:f"{float(x):.16e}"
     lines=["="*90,"NONLINEAR OPTIMIZATION REPORT","="*90,"",
            "OBJECTIVE","-"*90,
-           f"gradient weight = {cfg.GRADIENT_WEIGHT}",
+           f"construction    = {getattr(cfg, 'INVARIANT_CONSTRUCTION', 'a_box')}",
+           f"objective       = {getattr(cfg, 'OBJECTIVE', 'horizontal_shape')}",
+           (f"geometry options = {STATE.context['state']['action_geometry_options']}"
+            if getattr(cfg, 'OBJECTIVE', 'horizontal_shape') == 'action_geometry'
+            else f"reference options = {STATE.context['state']['reference_options']}"
+            if getattr(cfg, 'OBJECTIVE', 'horizontal_shape') == 'reference_fluctuation_index'
+            else f"gradient weight = {cfg.GRADIENT_WEIGHT}"),
            f"initial J       = {f(result['start_details']['objective'])}",
            f"final J         = {f(result['final_details']['objective'])}","",
            "OPTIMIZED PARAMETERS","-"*90,
@@ -671,7 +693,7 @@ def write_full_report(file_name=None):
     if STATE.Ix is not None:
         lines += ["","NONLINEAR INVARIANTS","-"*90,
                   f"Ix coefficients: {len(STATE.Ix)}",f"Iy coefficients: {len(STATE.Iy)}"]
-        for key in ("objective","value_norm","gradient_norm"):
+        for key in ("objective","quality","value_norm","gradient_norm"):
             if STATE.invariant_details and key in STATE.invariant_details:
                 lines.append(f"{key}: {STATE.invariant_details[key]}")
     if STATE.optimization_result is not None:

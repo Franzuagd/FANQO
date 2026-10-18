@@ -1,0 +1,72 @@
+{
+  "order": 8,
+  "delta_order": 1,
+  "tracking_used": false,
+  "parameters": {
+    "energy": 3.0,
+    "LSD": 0.1,
+    "F": 0.8,
+    "X1": 3.633167514008421,
+    "X2": -4.258277621861492,
+    "X3": -2.690860661253351,
+    "X4": 2.754505457254375,
+    "X5": -3.336431720192718,
+    "X6": -1.492176552197721,
+    "X7": 0.002943728718874649,
+    "X8": 0.6010287762639231,
+    "X9": 0.5370545478298007,
+    "kse1": -31.67808026513335,
+    "kfd2": -51.10107383195414,
+    "kfd3": -93.324704323109,
+    "ks1": -31.98668968024124,
+    "ks2": 41.64059482880812,
+    "ksd3": -11.2882623813059,
+    "ks1s": 696.35209098583,
+    "ks2s": 488.0292055866639,
+    "ksf1": 29.696887736202708,
+    "ksd1": -126.97921823044223,
+    "ko1": 4.72312991538625,
+    "ko2": 46.6898786404116,
+    "ko3": 23.51531647572548
+  },
+  "setup_seconds": 7.994445854999867,
+  "first_transport_seconds": 21.513561478000156,
+  "cached_transport_two_eigen_invariants_and_objective_seconds": 13.98747955699946,
+  "objective": 6.089794885345278,
+  "reference_options": {
+    "x_range": 0.0025,
+    "x_points": 21,
+    "y_range": 0.0007,
+    "y_points": 11,
+    "delta_values": [
+      -0.034
+    ],
+    "momentum_weight": 0.7
+  },
+  "Ix": {
+    "method": "eigen",
+    "normalization": "positive requested-plane quadratic determinant one",
+    "selection": "closest_full_quadratic_to_requested_CS_seed",
+    "target_seed": "Sx",
+    "quadratic_relative_distance": 0.27655747742149206,
+    "selection_metric": "Euclidean physical monomial coefficients, all delta=0 degree-2 terms",
+    "eigenvalue_residual": 9.550836570159994e-15,
+    "eigenvalue": 1.0000000000000095,
+    "reference_candidate_count": 6,
+    "eigen_cutoff": 1e-10
+  },
+  "Iy": {
+    "method": "eigen",
+    "normalization": "positive requested-plane quadratic determinant one",
+    "selection": "closest_full_quadratic_to_requested_CS_seed",
+    "target_seed": "Sy",
+    "quadratic_relative_distance": 0.09765873416330316,
+    "selection_metric": "Euclidean physical monomial coefficients, all delta=0 degree-2 terms",
+    "eigenvalue_residual": 6.407390284668231e-11,
+    "eigenvalue": 1.0000000000640739,
+    "reference_candidate_count": 6,
+    "eigen_cutoff": 1e-10
+  },
+  "horizontal_quadratic_determinant": 1.0,
+  "relative_transport_defect": 3.1161644296157364e-14
+}

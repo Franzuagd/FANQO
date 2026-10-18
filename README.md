@@ -47,6 +47,9 @@ my_fanqo_experiment/
 The files in `user/` are examples. Copy them outside the FANQO repository before
 editing them for a real experiment.
 
+For the optional radial--Fourier least-squares invariant and tracking-free
+geometric objective, see [the action geometry configuration](docs/action_geometry.md).
+
 ## Install with Anaconda
 
 ```bash
