@@ -797,7 +797,7 @@ def initialize_nonlinear_for_method(
 ):
     """Dispatch to one of FANQO's invariant representations."""
     method = str(invariant_construction).lower()
-    if method in ("action_a_box", "root_geometry"):
+    if method in ("action_a_box", "action_angle_ls", "root_geometry"):
         from .action_a_box import attach_metric
         state = initialize_nonlinear(
             data, m, d, hamiltonian, a_box, variables, field_symbols, n=n
@@ -807,7 +807,11 @@ def initialize_nonlinear_for_method(
         state['C'] = state['epsilon'].copy()
         state['invariant_construction'] = method
         state['method_options'] = dict(method_options or {})
-        attach_metric(state, state['method_options'].get('ACTION_BOX'))
+        if method in ('action_angle_ls', 'root_geometry'):
+            from .action_angle_ls import attach
+            attach(state, state['method_options'].get('ACTION_BOX'))
+        else:
+            attach_metric(state, state['method_options'].get('ACTION_BOX'))
         for name, axis in [('D_x', 1), ('D_y', 2), ('D_px', 3), ('D_py', 4)]:
             state[name] = build_derivative_matrix(state, axis)
         return state
@@ -1198,10 +1202,11 @@ def invariant_vectors(lattice, data, state, tol=1e-14, cache=True, **_legacy_kwa
         return Ix, Iy, details, transfer
 
     Sx, Sy = quadratic_invariants(data, state)
-    if method == 'root_geometry':
-        from .root_geometry import solve
+    if method in ('action_angle_ls', 'root_geometry'):
+        from .action_angle_ls import solve
         Ix, dx = solve(transfer, Sx, state, tol)
-        return Ix, None, {'method': method, 'Ix_details': dx}, transfer
+        Iy, dy = solve(transfer, Sy, state, tol)
+        return Ix, Iy, {'method': method, 'Ix_details': dx, 'Iy_details': dy}, transfer
     if method == 'action_a_box':
         from .action_a_box import solve
         Ix, dx = solve(transfer, Sx, state, tol)

@@ -1,0 +1,205 @@
+{
+  "delta": 0.0,
+  "root_slice_Jy": 0.0,
+  "root_slice_phi_y": null,
+  "order": 8,
+  "delta_order": 1,
+  "launch_actions": [
+    8.75e-07,
+    2.625e-06,
+    5.25e-06,
+    8.75e-06,
+    1.2249999999999998e-05,
+    1.575e-05
+  ],
+  "levels": [
+    8.75e-07,
+    2.625e-06,
+    5.25e-06,
+    8.75e-06,
+    1.2249999999999998e-05,
+    1.575e-05
+  ],
+  "action_box": {
+    "Jx_max": 1.75e-05,
+    "Jy_max": 1.83e-05,
+    "delta_max": 0.01
+  },
+  "config": "user/general_config.py",
+  "construction": "direct linear least squares in radial-Fourier coefficients",
+  "tracking_used_in_construction": false,
+  "methods": {
+    "action_angle_ls": {
+      "method": "action_angle_ls",
+      "solver": "linear SVD least squares",
+      "objective": "projected invariance residual in radial-Fourier/action L2",
+      "quadratic_seed": "fixed Courant-Snyder at delta=0",
+      "action_box": {
+        "Jx_max": 1.75e-05,
+        "Jy_max": 1.83e-05,
+        "delta_max": 0.01
+      },
+      "action_convention": "J=S=gamma*q^2+2*alpha*q*p+beta*p^2 (no 1/2)",
+      "rank": 968,
+      "unknowns": 975,
+      "rcond": 1e-14,
+      "residual_norm": 1.983679398943912e-16,
+      "relative_residual": 1.9633334313705992e-11,
+      "largest_singular_value": 26.166322697873238,
+      "smallest_retained_singular_value": 4.3468798214090794e-13,
+      "transport_similarity_error": 1.7453845502069523e-16
+    },
+    "a_box": {
+      "method": "a_box",
+      "constructor": "unchanged original weighted Cartesian LS"
+    }
+  },
+  "setup_and_transport_seconds": 17.519489840999995,
+  "radial_basis_and_solve_seconds": 0.4737105029998929,
+  "linear_cs0": [
+    5.728009128125011,
+    1.7001415298485539e-15,
+    0.17458072737522626,
+    3.4984147306369513,
+    -1.0435686895707821e-15,
+    0.28584375409885476
+  ],
+  "parameters": {
+    "energy": 3.0,
+    "LSD": 0.1,
+    "F": 0.8,
+    "X1": 3.633167514008421,
+    "X2": -4.258277621861492,
+    "X3": -2.690860661253351,
+    "X4": 2.754505457254375,
+    "X5": -3.336431720192718,
+    "X6": -1.492176552197721,
+    "X7": 0.002943728718874649,
+    "X8": 0.6010287762639231,
+    "X9": 0.5370545478298007,
+    "kse1": 0.0,
+    "kfd2": 0.0,
+    "kfd3": 0.0,
+    "ks1": 0.0,
+    "ks2": 0.0,
+    "ksd3": 0.0,
+    "ks1s": 0.0,
+    "ks2s": 0.0,
+    "ksf1": 42.721772698660175,
+    "ksd1": -99.94606443088693,
+    "ko1": 0.0,
+    "ko2": 0.0,
+    "ko3": 0.0
+  },
+  "analysis_cells": 1,
+  "horizontal_tracking": [
+    {
+      "method": "action_angle_ls",
+      "launch_Jx": 8.75e-07,
+      "max_relative_excursion": 4.8099655393774924e-05,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "action_angle_ls",
+      "launch_Jx": 2.625e-06,
+      "max_relative_excursion": 4.5516184396973286e-05,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "action_angle_ls",
+      "launch_Jx": 5.25e-06,
+      "max_relative_excursion": 0.0004611363462250388,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "action_angle_ls",
+      "launch_Jx": 8.75e-06,
+      "max_relative_excursion": 0.0028384948705416774,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "action_angle_ls",
+      "launch_Jx": 1.2249999999999998e-05,
+      "max_relative_excursion": 0.009929704068736,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "action_angle_ls",
+      "launch_Jx": 1.575e-05,
+      "max_relative_excursion": 0.020682511131409332,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "a_box",
+      "launch_Jx": 8.75e-07,
+      "max_relative_excursion": 5.317369800610987e-05,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "a_box",
+      "launch_Jx": 2.625e-06,
+      "max_relative_excursion": 3.9272966227701994e-05,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "a_box",
+      "launch_Jx": 5.25e-06,
+      "max_relative_excursion": 0.0001649218830109113,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "a_box",
+      "launch_Jx": 8.75e-06,
+      "max_relative_excursion": 0.0006814448388136918,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "a_box",
+      "launch_Jx": 1.2249999999999998e-05,
+      "max_relative_excursion": 0.0014218854368255216,
+      "completed_turns": 256,
+      "survived": true
+    },
+    {
+      "method": "a_box",
+      "launch_Jx": 1.575e-05,
+      "max_relative_excursion": 0.004756476000345285,
+      "completed_turns": 256,
+      "survived": true
+    }
+  ],
+  "physical_ring_cells": 20,
+  "invariance_map": {
+    "launched": 441,
+    "survived": 100,
+    "turns": 128,
+    "grid_steps": [
+      20,
+      20
+    ],
+    "coordinates_mm": [
+      -15.0,
+      15.0,
+      -15.0,
+      15.0
+    ]
+  },
+  "validation_note": "Corrected direct radial-Fourier LS; no nonlinear root refinement. 256 horizontal turns and 441 map launches for 128 turns; no tracking in construction.",
+  "software": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.17.0",
+    "pyat": "0.9.0"
+  },
+  "root_evaluation": "Direct radial-Fourier coefficients for action_angle_ls; all nonnegative roots, no branch filter."
+}

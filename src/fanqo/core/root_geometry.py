@@ -1,13 +1,11 @@
-"""Horizontal action--angle roots and constrained, tracking-free refinement.
+"""Horizontal action--angle roots; construction is direct radial--Fourier LS.
 
 J is FANQO's S=gamma*x^2+2*alpha*x*px+beta*px^2 (twice canonical action).
 All geometry here is at delta=0, y=py=0. Polynomial storage is unchanged;
 the radial--Fourier representation is evaluated exactly from that storage.
 """
 import numpy as np
-from scipy.optimize import minimize
 
-from .action_a_box import solve as action_solve
 
 
 def from_action_angle(action, phi, beta, alpha):
@@ -140,154 +138,40 @@ def root_curves(invariant, state, launch_actions, angles, action_scale, **kwargs
     return [trace_radial_branch(radial, J, action_scale, **kwargs) for J in launch_actions]
 
 
-def solve(transfer, seed, state, tol=1e-14):
-    """Refine horizontal root geometry, constrained by action-domain residual.
+def all_level_roots(invariant, state, levels, angles, action_scale, *, radial_coefficients=None):
+    """Every nonnegative real root for each fixed C at all sampled angles.
 
-    The CS seed block stays fixed. Weak algebraic directions in the entire
-    tail allow coupled/chromatic compensation for a horizontal geometry edit.
-    The objective itself remains at delta=0, Jy=0. No tracking import.
+    No continuation, nearest-root selection, slope filter or amplitude cutoff.
+    The repeated endpoint is evaluated from the same coefficients as phi=0.
     """
-    initial, seed_details = action_solve(transfer, seed, state, tol)
-    options = state.get('method_options', {})
-    scale = float(state['action_box']['Jx_max'])
-    launches = scale*np.asarray(options.get('ROOT_ACTION_FRACTIONS', (.05, .15, .3, .5, .7)), float)
-    n_angles = int(options.get('ROOT_ANGLES', 64))
-    maxiter = int(options.get('ROOT_MAX_ITER', 60))
-    factor = float(options.get('ROOT_RESIDUAL_FACTOR', 1.1))
-    floor = float(options.get('ROOT_RESIDUAL_FLOOR', 1e-8))
-    directions = int(options.get('ROOT_DIRECTIONS', 12))
-    weak_modes = int(options.get('ROOT_WEAK_MODES', 64))
-    if (n_angles < 8 or maxiter < 0 or factor < 1 or floor <= 0
-            or len(launches) == 0 or not np.isfinite(launches).all() or np.any(launches <= 0)
-            or not np.isfinite([factor, floor]).all() or directions < 1 or weak_modes < 1):
-        raise ValueError('Invalid ROOT_* refinement options.')
-    angles = np.linspace(0, 2*np.pi, n_angles+1)
-    indices, basis = radial_basis(state, angles, scale)
-    q = state['quad_size']
-    local_free = np.flatnonzero(indices >= q)
-    free = np.arange(q, len(initial))
-    radial0 = basis @ initial[indices]
-    curves0 = [trace_radial_branch(radial0, J, scale, max_action=4*scale) for J in launches]
-    fit = [i for i, c in enumerate(curves0) if c['complete']]
-    W = state['action_weight']; R = np.asarray(transfer)-np.eye(len(transfer))
-    weighted = W @ R
-    seed_norm = max(float(np.linalg.norm(W @ np.r_[seed, np.zeros(len(initial)-len(seed))])), np.finfo(float).tiny)
-    e0 = weighted @ initial / seed_norm
-    limit = max(factor*np.linalg.norm(e0), floor)
-    details = dict(method='root_geometry', seed_method='action_a_box', seed_details=seed_details,
-                   geometry_slice='delta=0, Jy=0 (phi_y undefined)',
-                   action_convention=state['action_convention'],
-                   objective='mean squared (g_C(phi)/J_launch-1), C=P(J_launch,0)',
-                   residual_initial=float(np.linalg.norm(e0)), residual_limit=float(limit),
-                   fit_launch_actions=launches[fit].tolist(),
-                   excluded_launches=[dict(action=float(J), status=c['status'])
-                                      for J, c in zip(launches, curves0) if not c['complete']],
-                   accepted=False, root_angles=n_angles, max_iterations=maxiter,
-                   residual_factor=factor, residual_floor=floor,
-                   adjustable_coefficients=int(len(free)))
-    if not fit or not len(free):
-        details.update(status='no_complete_seed_branches' if not fit else 'no_free_horizontal_terms',
-                       residual_final=float(np.linalg.norm(e0)))
-        return initial, details
-    # First retain weak full-tail algebraic directions. A purely horizontal
-    # edit may need vertical/chromatic compensation to stay approximately
-    # invariant. Normalize columns by their RMS in the action metric.
-    column_scale = seed_norm/np.sqrt(np.diag(state['G'])[free])
-    A = weighted[:, free]*column_scale / seed_norm
-    _, singular, vh = np.linalg.svd(A, full_matrices=False)
-    count = min(weak_modes, len(free))
-    steps = np.minimum(1., limit/(np.sqrt(count)*np.maximum(singular[-count:], 1e-30)))
-    B = column_scale[:, None]*vh[-count:].T*steps
-    horizontal_rows = indices[local_free]-q
-    # Rank directions by visible root-geometry changes across fitting radii,
-    # rather than spending optimizer variables on invisible chromatic modes.
-    visible = []
-    for J in launches[fit]:
-        u = np.sqrt(J/scale)
-        phi_values = np.einsum('akh,k->ah', basis[:, :, local_free],
-                               u**np.arange(basis.shape[1]))
-        visible.append(phi_values @ B[horizontal_rows]/J)
-    _, visible_singular, rotation = np.linalg.svd(np.vstack(visible), full_matrices=False)
-    keep = min(directions, int(np.sum(visible_singular > max(visible_singular[0]*1e-12, 1e-30))))
-    if keep == 0:
-        details.update(status='no_visible_algebraic_directions', residual_final=float(np.linalg.norm(e0)))
-        return initial, details
-    B = B @ rotation[:keep].T
-    tangent = np.einsum('akh,hv->akv', basis[:, :, local_free], B[horizontal_rows])/scale
-    E = weighted[:, free] @ B / seed_norm
-    details.update(optimized_directions=keep, weak_modes=count)
-    best = {'score': np.inf, 'z': np.zeros(keep)}
-    cache = {}
+    levels = np.asarray(levels, float)
+    if levels.ndim != 1 or not len(levels) or not np.isfinite(levels).all():
+        raise ValueError('Levels must be a nonempty finite 1D array.')
+    if radial_coefficients is None:
+        indices, basis = radial_basis(state, angles, action_scale)
+        radial = (basis @ np.asarray(invariant)[indices])/action_scale
+    else:
+        # Evaluate the new ansatz directly in sqrt(J), without converting it
+        # back into Cartesian monomials for the root polynomial.
+        radial = np.zeros((len(angles), state['m']+1))
+        ratio = action_scale/state['action_box']['Jx_max']
+        for coefficient, label in zip(radial_coefficients, state['radial_labels']):
+            delta_degree, i, j, n, kind_x, m, kind_y = label
+            if delta_degree or j:
+                continue
+            angular = np.cos(n*angles) if kind_x == 'c' else np.sin(n*angles)
+            radial[:, i] += coefficient*ratio**(i/2)*angular/action_scale
+    if np.isclose(angles[-1]-angles[0], 2*np.pi, rtol=0, atol=1e-12):
+        radial[-1] = radial[0]
+    output = []
+    for level in levels:
+        polynomial = radial.copy(); polynomial[:, 0] -= level/action_scale
+        rows = [positive_roots(c) for c in polynomial]
+        output.append(dict(level=float(level), all_roots=[None if r is None else action_scale*r*r for r in rows]))
+    return output
 
-    def evaluate(z):
-        if 'z' in cache and np.array_equal(cache['z'], z):
-            return cache['value']
-        radial = radial0/scale + tangent @ z
-        residuals = []; gradients = []; valid = True
-        for k in fit:
-            curve = trace_radial_branch(radial*scale, launches[k], scale, max_action=4*scale)
-            if not curve['complete']:
-                valid = False; break
-            u = np.sqrt(curve['action']/scale)
-            u0 = np.sqrt(launches[k]/scale)
-            powers = np.arange(radial.shape[1])
-            dC = (u0**powers) @ tangent[0]
-            dg = np.empty((n_angles, len(z)))
-            for a, r in enumerate(u[:-1]):
-                dP = (r**powers) @ tangent[a]
-                derivative = np.polynomial.polynomial.polyval(r, np.polynomial.polynomial.polyder(radial[a]))
-                dg[a] = 2*scale*r*(dC-dP)/derivative/launches[k]
-            residuals.extend(curve['action'][:-1]/launches[k]-1)
-            gradients.extend(dg)
-        if valid:
-            residuals = np.asarray(residuals); gradients = np.asarray(gradients)
-            score = float(np.mean(residuals**2))
-            gradient = 2*residuals @ gradients/len(residuals)
-            feasible = np.linalg.norm(e0+E@z) <= limit*(1+1e-8)
-            if feasible and score < best['score']:
-                best.update(score=score, z=np.array(z, copy=True))
-        else:
-            score = 1e6; gradient = np.zeros_like(z)
-        value = score, gradient
-        cache.update(z=np.array(z, copy=True), value=value)
-        return value
 
-    z0 = np.zeros(keep); initial_score = evaluate(z0)[0]
-    constraint = dict(type='ineq',
-        fun=lambda z: 1-np.dot(e0+E@z, e0+E@z)/limit**2,
-        jac=lambda z: -2*(e0+E@z) @ E/limit**2)
-    result = minimize(lambda z: evaluate(z)[0], z0, jac=lambda z: evaluate(z)[1],
-                      method='SLSQP', bounds=[(-2., 2.)]*keep,
-                      constraints=[constraint], options=dict(maxiter=maxiter, ftol=1e-12))
-    evaluate(result.x)
-    candidate = initial.copy(); candidate[free] += B @ best['z']
-    accepted = best['score'] < initial_score-max(1e-14, 1e-8*initial_score)
-    if not accepted:
-        candidate = initial
-    final_norm = float(np.linalg.norm(weighted @ candidate)/seed_norm)
-    # Independent postcondition; do not return a numerically infeasible fit.
-    if final_norm > limit*(1+1e-7):
-        candidate = initial; accepted = False; final_norm = float(np.linalg.norm(e0))
-    # Check the actual returned polynomial on a denser, independent angular
-    # grid. A fitting-grid improvement alone does not justify accepting it.
-    validation = {}
-    if accepted:
-        dense_angles = np.linspace(0, 2*np.pi, 2*n_angles+1)
-        initial_dense = root_curves(initial, state, launches[fit], dense_angles, scale,
-                                    max_action=4*scale)
-        candidate_dense = root_curves(candidate, state, launches[fit], dense_angles, scale,
-                                      max_action=4*scale)
-        complete = all(c['complete'] for c in initial_dense+candidate_dense)
-        if complete:
-            before = float(np.mean([c['statistics']['relative_launch_rms']**2 for c in initial_dense]))
-            after = float(np.mean([c['statistics']['relative_launch_rms']**2 for c in candidate_dense]))
-            validation.update(validation_objective_initial=before, validation_objective_final=after,
-                              validation_angles=2*n_angles)
-        if not complete or after >= before-max(1e-14, 1e-8*before):
-            candidate = initial; accepted = False; final_norm = float(np.linalg.norm(e0))
-    details.update(status='refined' if accepted else 'seed_retained', accepted=bool(accepted),
-                   objective_initial=initial_score,
-                   objective_final=best['score'] if accepted else initial_score,
-                   residual_final=final_norm, optimizer_success=bool(result.success),
-                   optimizer_message=str(result.message), iterations=int(result.nit), **validation)
-    return candidate, details
+def solve(transfer, seed, state, tol=1e-14):
+    """Compatibility alias: direct radial--Fourier LS, no root refinement."""
+    from .action_angle_ls import solve as direct_solve
+    return direct_solve(transfer, seed, state, tol)

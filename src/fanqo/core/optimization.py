@@ -139,7 +139,11 @@ def create_context(
 def _refresh_nonlinear_normalization(state, data):
     """Update only the part of the nonlinear state that depends on CS0."""
     cs0 = np.asarray(lin.linear_data(data, "CS0"), dtype=float)
-    if state.get('invariant_construction') in ('action_a_box', 'root_geometry'):
+    if state.get('invariant_construction') in ('action_angle_ls', 'root_geometry'):
+        from .action_angle_ls import attach
+        attach(state, state['action_box'], cs0)
+        return
+    if state.get('invariant_construction') == 'action_a_box':
         from .action_a_box import attach_metric
         attach_metric(state, state['action_box'], cs0)
         return
@@ -364,9 +368,7 @@ def prepare_objective_data(
 
     method = state.get("invariant_construction", "a_box")
     need_quadratic = bool(requirements & {"Sx", "Sy"})
-    if method == 'root_geometry' and 'Iy' in requirements:
-        raise ValueError('root_geometry currently constructs Ix only; set COMPUTE_IY=False.')
-    if method in ("a_box", "a_box_eigen_initial", "action_a_box", "root_geometry"):
+    if method in ("a_box", "a_box_eigen_initial", "action_a_box", "action_angle_ls", "root_geometry"):
         need_quadratic = need_quadratic or bool(requirements & {"Ix", "Iy"})
     Sx = Sy = None
     if need_quadratic:
@@ -386,9 +388,12 @@ def prepare_objective_data(
         if "tnq" in requirements:
             result["tnq"] = tnq
         method = state.get("invariant_construction", "a_box")
-        if method == 'root_geometry' and 'Ix' in requirements:
-            from .root_geometry import solve
-            result['Ix'], result['Ix_construction_details'] = solve(transfer, Sx, state, tol)
+        if method in ('action_angle_ls', 'root_geometry') and requirements & {'Ix', 'Iy'}:
+            from .action_angle_ls import solve
+            for plane, seed in [('x', Sx), ('y', Sy)]:
+                key = 'I'+plane
+                if key in requirements:
+                    result[key], result[key+'_construction_details'] = solve(transfer, seed, state, tol)
             return result
         if method == 'action_a_box' and requirements & {'Ix', 'Iy'}:
             from .action_a_box import solve

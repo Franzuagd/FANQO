@@ -27,4 +27,5 @@ Ix_comb_results/
 
 # Generated root-comparison outputs and crash-interrupted runtime configs.
 root_comparison/
+action_angle_comparison/
 user/_root_compare_*.py

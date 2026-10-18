@@ -1,6 +1,6 @@
 # FANQO — root geometry comparison
 
-The current branch adds the root-based invariant construction and the
+The current branch adds direct radial-Fourier least squares and the
 delta-zero comparison runner. See [docs/root_geometry.md](docs/root_geometry.md)
 for installation, the precise constrained objective and the output files.
 Run `python user/run_root_comparison.py --quick` from an installed checkout.
