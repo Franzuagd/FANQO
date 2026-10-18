@@ -207,8 +207,13 @@ def _invariance_maps(out, ring, orbit, invariants, states, coords, steps, turns,
 def run_root_comparison(config, *, output='action_angle_comparison', order=8, delta_order=1,
                         action_box=None, launch_actions=None, action_fractions=(.05,.15,.3,.5,.7,.9),
                         level_values=None, angles=360, turns=1024, map_steps=(30,30),
-                        map_turns=None, geometry_only=False):
+                        map_turns=None, geometry_only=False, root_options=None):
     """Direct LS construction, all-root diagrams, then independent tracking."""
+    # The original distributed runner supplied this keyword. Accept it so an
+    # old local runner can launch the corrected LS code; never revive its
+    # obsolete nonlinear-refinement settings.
+    if root_options is not None:
+        print('Compatibility: legacy root_options ignored; using direct linear action-angle LS.', flush=True)
     if order<3 or delta_order not in (0,1) or angles<8 or turns<1 or min(map_steps)<1:
         raise ValueError('Require order>=3, delta_order in {0,1}, angles>=8, turns>=1 and positive map steps.')
     config=Path(config).expanduser().resolve(); cfg=config_loader.load_general_config(config,reload=True)
@@ -223,7 +228,8 @@ def run_root_comparison(config, *, output='action_angle_comparison', order=8, de
     report=dict(delta=0.,root_slice_Jy=0.,root_slice_phi_y=None,order=order,delta_order=delta_order,
                 launch_actions=actions,levels=levels,action_box=action_box,config=str(config),
                 construction='direct linear least squares in radial-Fourier coefficients',
-                tracking_used_in_construction=False,methods={})
+                tracking_used_in_construction=False,methods={},
+                ignored_legacy_root_options=list(root_options) if root_options is not None else [])
     with tempfile.NamedTemporaryFile(mode='w',suffix='.py',prefix='_root_compare_',dir=config.parent,delete=False) as f:
         runtime=Path(f.name)
     try:

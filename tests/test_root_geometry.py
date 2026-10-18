@@ -109,7 +109,8 @@ def test_all_root_plot_data_retains_both_branches(problem):
         np.testing.assert_array_equal(rootset['all_roots'][0],rootset['all_roots'][-1])
 
 
-def test_geometry_runner_never_calls_tracking(tmp_path, monkeypatch):
+@pytest.mark.parametrize('legacy_options',[None,{'ROOT_MAX_ITER':999,'ROOT_RESIDUAL_FACTOR':42.}])
+def test_geometry_runner_never_calls_tracking(tmp_path, monkeypatch, legacy_options):
     from fanqo.root_comparison import run_root_comparison
     def forbidden(*args, **kwargs):
         raise AssertionError('Tracking called during geometry-only construction')
@@ -117,8 +118,10 @@ def test_geometry_runner_never_calls_tracking(tmp_path, monkeypatch):
     monkeypatch.setattr(api, '_track_initial_conditions', forbidden)
     config = Path(__file__).resolve().parents[1]/'user'/'general_config.py'
     report = run_root_comparison(config, output=tmp_path, order=3, delta_order=0,
-        angles=16, geometry_only=True)
+        angles=16, geometry_only=True, root_options=legacy_options)
     assert report['tracking_used_in_construction'] is False
+    assert report['methods']['action_angle_ls']['solver']=='linear SVD least squares'
+    assert report['ignored_legacy_root_options']==(list(legacy_options) if legacy_options is not None else [])
     assert not list(tmp_path.glob('tracking_*.npz'))
     assert (tmp_path/'algebraic_action_angle.png').is_file()
     assert (tmp_path/'action_angle_ls'/'Ix_coefficients.npz').is_file()

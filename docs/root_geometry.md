@@ -97,7 +97,9 @@ W_J.T W_J = G_J.
 This is linear SVD least squares with the existing LEAST_SQUARES_TOL. Root
 values, root variance, branch existence and tracked samples do not enter the
 solve. The ROOT_* refinement settings from the superseded implementation
-are no longer used.
+are no longer used. For compatibility with the original downloaded runner,
+the function accepts its `root_options` keyword, prints a compatibility notice,
+and ignores those obsolete options; it always performs direct linear LS.
 
 The admissible smooth polynomial space is equivalent to the Cartesian one.
 Changing basis alone cannot improve the exact attainable residual. The action
